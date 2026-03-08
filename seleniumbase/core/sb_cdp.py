@@ -1,11 +1,14 @@
 """Add CDP methods to extend the driver"""
 import asyncio
 import fasteners
+import mycdp
 import os
+import random
 import re
 import sys
 import time
 from contextlib import suppress
+from filelock import FileLock
 from seleniumbase import config as sb_config
 from seleniumbase.config import settings
 from seleniumbase.fixtures import constants
@@ -13,6 +16,7 @@ from seleniumbase.fixtures import js_utils
 from seleniumbase.fixtures import page_utils
 from seleniumbase.fixtures import shared_utils
 from seleniumbase.undetected.cdp_driver import cdp_util
+from seleniumbase.undetected.cdp_driver import tab as cdp_tab
 
 
 class CDPMethods():
@@ -63,6 +67,11 @@ class CDPMethods():
         )
         element.highlight_overlay = lambda: self.__highlight_overlay(element)
         element.mouse_click = lambda: self.__mouse_click(element)
+        element.click_with_offset = (
+            lambda *args, **kwargs: self.__mouse_click_with_offset_async(
+                element, *args, **kwargs
+            )
+        )
         element.mouse_drag = (
             lambda destination: self.__mouse_drag(element, destination)
         )
@@ -101,12 +110,23 @@ class CDPMethods():
         element.get_parent = lambda: self.__get_parent(element)
         return element
 
-    def get(self, url):
+    def get(self, url, **kwargs):
         url = shared_utils.fix_url_as_needed(url)
         driver = self.driver
         if hasattr(driver, "cdp_base"):
             driver = driver.cdp_base
-        self.loop.run_until_complete(self.page.get(url))
+        load_timeout = 60.0
+        wait_timeout = 30.0
+        if hasattr(sb_config, "_cdp_proxy") and sb_config._cdp_proxy:
+            load_timeout = 90.0
+            wait_timeout = 45.0
+        try:
+            task = self.page.get(url, **kwargs)
+            self.loop.run_until_complete(
+                asyncio.wait_for(task, timeout=load_timeout)
+            )
+        except asyncio.TimeoutError:
+            print("Timeout loading %s" % url)
         url_protocol = url.split(":")[0]
         safe_url = True
         if url_protocol not in ["about", "data", "chrome"]:
@@ -118,10 +138,17 @@ class CDPMethods():
         else:
             time.sleep(0.012)
         self.__slow_mode_pause_if_set()
-        self.loop.run_until_complete(self.page.wait())
+        try:
+            self.loop.run_until_complete(
+                asyncio.wait_for(self.page.wait(), timeout=wait_timeout)
+            )
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            pass
 
-    def open(self, url):
-        self.get(url)
+    def open(self, url, **kwargs):
+        self.get(url, **kwargs)
 
     def reload(self, ignore_cache=True, script_to_evaluate_on_load=None):
         self.loop.run_until_complete(
@@ -136,6 +163,48 @@ class CDPMethods():
 
     def get_event_loop(self):
         return self.loop
+
+    def get_rd_host(self):
+        """Returns the remote-debugging host (likely 127.0.0.1)"""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        return driver.config.host
+
+    def get_rd_port(self):
+        """Returns the remote-debugging port (commonly 9222)"""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        return driver.config.port
+
+    def get_rd_url(self):
+        """Returns the remote-debugging URL, which is used for
+        allowing the Playwright integration to launch stealthy,
+        and also applies nest-asyncio for nested event loops so
+        that SeleniumBase methods can be called from Playwright
+        without encountering event loop error messages such as:
+        Cannot run the event loop while another loop is running.
+        Also sets an environment variable to hide this warning:
+        Deprecation: "url.parse() behavior is not standardized".
+        (github.com/microsoft/playwright-python/issues/3016)"""
+        import nest_asyncio
+        nest_asyncio.apply()
+        os.environ["NODE_NO_WARNINGS"] = "1"
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        host = driver.config.host
+        port = driver.config.port
+        return f"http://{host}:{port}"
+
+    def get_endpoint_url(self):
+        """Same as get_rd_url(), which returns the remote-debugging URL."""
+        return self.get_rd_url()
+
+    def get_port(self):
+        """Same as get_rd_port(), which returns the remote-debugging port."""
+        return self.get_rd_port()
 
     def add_handler(self, event, handler):
         self.page.add_handler(event, handler)
@@ -186,46 +255,23 @@ class CDPMethods():
         element with the given tag. (Eg: a, button, div, script, span)"""
         if not timeout:
             timeout = settings.SMALL_TIMEOUT
-        self.__add_light_pause()
-        time_now = time.time()
-        self.assert_text(text, timeout=timeout)
-        spent = int(time.time() - time_now)
-        remaining = 1 + timeout - spent
         if tag_name:
-            self.assert_element(tag_name, timeout=remaining)
-        elements = self.loop.run_until_complete(
-            self.page.find_elements_by_text(text=text)
-        )
-        if tag_name:
-            tag_name = tag_name.lower().strip()
-        for element in elements:
-            if element and not tag_name:
-                element = self.__add_sync_methods(element)
-                return self.__add_sync_methods(element)
-            elif (
-                element
-                and tag_name in element.tag_name.lower()
-                and text.strip() in element.text
-            ):
-                element = self.__add_sync_methods(element)
-                return self.__add_sync_methods(element)
-            elif (
-                element
-                and element.parent
-                and tag_name in element.parent.tag_name.lower()
-                and text.strip() in element.parent.text
-            ):
-                element = self.__add_sync_methods(element.parent)
-                return self.__add_sync_methods(element)
-            elif (
-                element
-                and element.parent
-                and element.parent.parent
-                and tag_name in element.parent.parent.tag_name.lower()
-                and text.strip() in element.parent.parent.text
-            ):
-                element = self.__add_sync_methods(element.parent.parent)
-                return self.__add_sync_methods(element)
+            try:
+                return self.find_element(
+                    '%s:contains("%s")' % (tag_name, text), timeout=timeout
+                )
+            except Exception:
+                pass  # The exception will be raised later
+        else:
+            self.__add_light_pause()
+            self.assert_text(text, timeout=timeout)
+            elements = self.loop.run_until_complete(
+                self.page.find_elements_by_text(text=text)
+            )
+            for element in elements:
+                if element:
+                    element = self.__add_sync_methods(element)
+                    return self.__add_sync_methods(element)
         plural = "s"
         if timeout == 1:
             plural = ""
@@ -300,28 +346,7 @@ class CDPMethods():
         self.__add_light_pause()
         selector = self.__convert_to_css_if_xpath(selector)
         if (":contains(" in selector):
-            tag_name = selector.split(":contains(")[0].split(" ")[-1]
-            text = selector.split(":contains(")[1].split(")")[0][1:-1]
-            with suppress(Exception):
-                new_timeout = timeout
-                if new_timeout < 1:
-                    new_timeout = 1
-                self.loop.run_until_complete(
-                    self.page.select(tag_name, timeout=new_timeout)
-                )
-                self.loop.run_until_complete(
-                    self.page.find(text, timeout=new_timeout)
-                )
-            elements = self.find_elements_by_text(text, tag_name=tag_name)
-            if not elements:
-                plural = "s"
-                if timeout == 1:
-                    plural = ""
-                msg = "\n Element {%s} was not found after %s second%s!"
-                message = msg % (selector, timeout, plural)
-                raise Exception(message)
-            element = self.__add_sync_methods(elements[0])
-            return element
+            return self.find_element(selector, timeout=timeout)
         failure = False
         try:
             element = self.loop.run_until_complete(
@@ -490,6 +515,15 @@ class CDPMethods():
         self.loop.run_until_complete(self.page.wait())
         return result
 
+    def __mouse_click_with_offset_async(self, element, *args, **kwargs):
+        result = (
+            self.loop.run_until_complete(
+                element.mouse_click_with_offset_async(*args, **kwargs)
+            )
+        )
+        self.loop.run_until_complete(self.page.wait())
+        return result
+
     def __mouse_drag(self, element, destination):
         return (
             self.loop.run_until_complete(element.mouse_drag_async(destination))
@@ -508,7 +542,7 @@ class CDPMethods():
             text = text[:-1]
         for key in text:
             element.send_keys(key)
-            time.sleep(0.044)
+            time.sleep(float(0.042 + (random.random() / 110.0)))
         if submit:
             element.send_keys("\r\n")
             time.sleep(0.044)
@@ -645,6 +679,30 @@ class CDPMethods():
             driver.tile_windows(windows, max_columns)
         )
 
+    def grant_permissions(self, permissions, origin=None):
+        """Grant specific permissions to the current window.
+        Applies to all origins if no origin is specified."""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        return self.loop.run_until_complete(
+            driver.grant_permissions(permissions, origin)
+        )
+
+    def grant_all_permissions(self):
+        """Grant all permissions to the current window for all origins."""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        return self.loop.run_until_complete(driver.grant_all_permissions())
+
+    def reset_permissions(self):
+        """Reset permissions for all origins on the current window."""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        return self.loop.run_until_complete(driver.reset_permissions())
+
     def get_all_cookies(self, *args, **kwargs):
         driver = self.driver
         if hasattr(driver, "cdp_base"):
@@ -681,9 +739,7 @@ class CDPMethods():
         driver = self.driver
         if hasattr(driver, "cdp_base"):
             driver = driver.cdp_base
-        return self.loop.run_until_complete(
-            driver.cookies.clear()
-        )
+        return self.loop.run_until_complete(driver.cookies.clear())
 
     def sleep(self, seconds):
         time.sleep(seconds)
@@ -702,9 +758,7 @@ class CDPMethods():
 
         js_code = active_css_js.get_active_element_css
         js_code = js_code.replace("return getBestSelector", "getBestSelector")
-        return self.loop.run_until_complete(
-            self.page.evaluate(js_code)
-        )
+        return self.loop.run_until_complete(self.page.evaluate(js_code))
 
     def click(self, selector, timeout=None):
         if not timeout:
@@ -712,7 +766,21 @@ class CDPMethods():
         self.__slow_mode_pause_if_set()
         element = self.find_element(selector, timeout=timeout)
         element.scroll_into_view()
-        element.click()
+        tag_name = element.tag_name
+        if tag_name:
+            tag_name = tag_name.lower().strip()
+        if (
+            tag_name in [
+                "a", "button", "canvas", "div", "input", "li", "span", "label"
+            ]
+            and "contains(" not in selector
+        ):
+            try:
+                element.mouse_click()  # Simulated click (NOT PyAutoGUI)
+            except Exception:
+                element.click()  # Standard CDP click
+        else:
+            element.click()  # Standard CDP click
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.wait())
 
@@ -723,14 +791,17 @@ class CDPMethods():
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.wait())
 
-    def click_if_visible(self, selector):
+    def click_if_visible(self, selector, timeout=0):
         if self.is_element_visible(selector):
             with suppress(Exception):
-                element = self.find_element(selector, timeout=0)
-                element.scroll_into_view()
-                element.click()
-                self.__slow_mode_pause_if_set()
-                self.loop.run_until_complete(self.page.wait())
+                self.click(selector, timeout=1)
+        elif timeout == 0:
+            return
+        else:
+            with suppress(Exception):
+                self.find_element(selector, timeout=timeout)
+                if self.is_element_visible(selector):
+                    self.click(selector, timeout=1)
 
     def click_visible_elements(self, selector, limit=0):
         """Finds all matching page elements and clicks visible ones in order.
@@ -758,7 +829,7 @@ class CDPMethods():
                     element.scroll_into_view()
                     element.click()
                     click_count += 1
-                    time.sleep(0.042)
+                    time.sleep(0.044)
                     self.__slow_mode_pause_if_set()
                     self.loop.run_until_complete(self.page.wait())
             except Exception:
@@ -800,6 +871,37 @@ class CDPMethods():
                 return
         raise Exception(
             "Unable to find text option {%s} in dropdown {%s}!"
+            % (dropdown_selector, option)
+        )
+
+    def select_option_by_index(self, dropdown_selector, option):
+        element = self.find_element(dropdown_selector)
+        element.scroll_into_view()
+        options = element.query_selector_all("option")
+        count = 0
+        for found_option in options:
+            if count == int(option):
+                found_option.select_option()
+                return
+            count += 1
+        raise Exception(
+            "Unable to find index option {%s} in dropdown {%s}!"
+            % (dropdown_selector, option)
+        )
+
+    def select_option_by_value(self, dropdown_selector, option):
+        element = self.find_element(dropdown_selector)
+        element.scroll_into_view()
+        options = element.query_selector_all("option")
+        for found_option in options:
+            if (
+                "value" in found_option.attrs
+                and str(found_option.attrs["value"]) == str(option)
+            ):
+                found_option.select_option()
+                return
+        raise Exception(
+            "Unable to find value option {%s} in dropdown {%s}!"
             % (dropdown_selector, option)
         )
 
@@ -878,6 +980,12 @@ class CDPMethods():
         element.scroll_into_view()
         if text.endswith("\n") or text.endswith("\r"):
             text = text[:-1] + "\r\n"
+        elif (
+            element.tag_name == "textarea"
+            and "\n" in text
+            and "\r" not in text
+        ):
+            text = text.replace("\n", "\r")
         element.send_keys(text)
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.sleep(0.025))
@@ -893,9 +1001,15 @@ class CDPMethods():
         if text.endswith("\n") or text.endswith("\r"):
             submit = True
             text = text[:-1]
+        elif (
+            element.tag_name == "textarea"
+            and "\n" in text
+            and "\r" not in text
+        ):
+            text = text.replace("\n", "\r")
         for key in text:
             element.send_keys(key)
-            time.sleep(0.044)
+            time.sleep(float(0.042 + (random.random() / 110.0)))
         if submit:
             element.send_keys("\r\n")
             time.sleep(0.044)
@@ -913,7 +1027,23 @@ class CDPMethods():
             element.clear_input()
         if text.endswith("\n") or text.endswith("\r"):
             text = text[:-1] + "\r\n"
+        elif (
+            element.tag_name == "textarea"
+            and "\n" in text
+            and "\r" not in text
+        ):
+            text = text.replace("\n", "\r")
         element.send_keys(text)
+        self.__slow_mode_pause_if_set()
+        self.loop.run_until_complete(self.page.sleep(0.025))
+
+    def clear_input(self, selector, timeout=None):
+        if not timeout:
+            timeout = settings.SMALL_TIMEOUT
+        self.__slow_mode_pause_if_set()
+        element = self.select(selector, timeout=timeout)
+        element.scroll_into_view()
+        element.clear_input()
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.sleep(0.025))
 
@@ -978,25 +1108,31 @@ class CDPMethods():
                 "\n".join(exp_list[0:-1]) + "\n"
                 + exp_list[-1].strip()[len("return "):]
             ).strip()
-        return self.loop.run_until_complete(
-            self.page.evaluate(expression)
-        )
+        return self.loop.run_until_complete(self.page.evaluate(expression))
+
+    def execute_script(self, expression):
+        return self.evaluate(expression)
 
     def js_dumps(self, obj_name):
         """Similar to evaluate(), but for dictionary results."""
         if obj_name.startswith("return "):
             obj_name = obj_name[len("return "):]
-        return self.loop.run_until_complete(
-            self.page.js_dumps(obj_name)
-        )
+        return self.loop.run_until_complete(self.page.js_dumps(obj_name))
 
     def maximize(self):
-        if self.get_window()[1].window_state.value == "maximized":
-            return
-        elif self.get_window()[1].window_state.value == "minimized":
-            self.loop.run_until_complete(self.page.maximize())
-            time.sleep(0.044)
-        return self.loop.run_until_complete(self.page.maximize())
+        try:
+            if self.get_window()[1].window_state.value == "maximized":
+                return
+            elif self.get_window()[1].window_state.value == "minimized":
+                self.loop.run_until_complete(self.page.maximize())
+                time.sleep(0.044)
+            return self.loop.run_until_complete(self.page.maximize())
+        except Exception:
+            with suppress(Exception):
+                width = self.evaluate("screen.availWidth;")
+                height = self.evaluate("screen.availHeight;")
+                self.__set_window_rect(0, 0, width, height)
+                return
 
     def minimize(self):
         if self.get_window()[1].window_state.value != "minimized":
@@ -1008,24 +1144,42 @@ class CDPMethods():
             time.sleep(0.044)
         return self.loop.run_until_complete(self.page.medimize())
 
-    def set_window_rect(self, x, y, width, height):
-        if self.get_window()[1].window_state.value == "minimized":
-            self.loop.run_until_complete(
+    def __set_window_rect(self, x, y, width, height, uc_lock=False):
+        if uc_lock:
+            gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+            with gui_lock:
+                self.__make_sure_pyautogui_lock_is_writable()
+                if self.get_window()[1].window_state.value == "minimized":
+                    self.loop.run_until_complete(
+                        self.page.set_window_size(
+                            left=x, top=y, width=width, height=height)
+                    )
+                    time.sleep(0.044)
+                return self.loop.run_until_complete(
+                    self.page.set_window_size(
+                        left=x, top=y, width=width, height=height)
+                )
+        else:
+            if self.get_window()[1].window_state.value == "minimized":
+                self.loop.run_until_complete(
+                    self.page.set_window_size(
+                        left=x, top=y, width=width, height=height)
+                )
+                time.sleep(0.044)
+            return self.loop.run_until_complete(
                 self.page.set_window_size(
                     left=x, top=y, width=width, height=height)
             )
-            time.sleep(0.044)
-        return self.loop.run_until_complete(
-            self.page.set_window_size(
-                left=x, top=y, width=width, height=height)
-        )
+
+    def set_window_rect(self, x, y, width, height):
+        return self.__set_window_rect(x, y, width, height, uc_lock=True)
 
     def reset_window_size(self):
         x = settings.WINDOW_START_X
         y = settings.WINDOW_START_Y
         width = settings.CHROME_START_WIDTH
         height = settings.CHROME_START_HEIGHT
-        self.set_window_rect(x, y, width, height)
+        self.__set_window_rect(x, y, width, height, uc_lock=True)
         self.__add_light_pause()
 
     def open_new_window(self, url=None, switch_to=True):
@@ -1037,10 +1191,74 @@ class CDPMethods():
     def switch_to_newest_window(self):
         self.switch_to_tab(-1)
 
-    def open_new_tab(self, url=None, switch_to=True):
+    def open_new_tab(self, url=None, switch_to=True, **kwargs):
+        driver = self.driver
         if not isinstance(url, str):
             url = "about:blank"
-        self.loop.run_until_complete(self.page.get(url, new_tab=True))
+        if hasattr(driver, "cdp_base"):
+            try:
+                self.loop.run_until_complete(
+                    self.page.get(url, new_tab=True, **kwargs)
+                )
+            except Exception:
+                original_targets = self.loop.run_until_complete(
+                    self.page.send(mycdp.target.get_targets())
+                )
+                tab_url = driver.cdp_base.tabs[0].websocket_url
+                if not self.driver.is_connected():
+                    self.driver.connect()
+                self.driver.open_new_tab()
+                targets = self.loop.run_until_complete(
+                    self.page.send(mycdp.target.get_targets())
+                )
+                new_targets = []
+                for target in targets:
+                    if target not in original_targets:
+                        new_targets.append(target)
+                if new_targets:
+                    found_target = new_targets[0]
+                    t_str = str(new_targets[0])
+                    target_id = (
+                        t_str.split("target_id=TargetID('")[-1].split("')")[0]
+                    )
+                    pre_tab_url = tab_url.split("/page/")[0] + "/page/"
+                    new_tab_url = pre_tab_url + target_id
+                    new_tab = cdp_tab.Tab(
+                        new_tab_url, found_target, driver.cdp_base
+                    )
+                    driver.cdp_base.targets.append(new_tab)
+                    driver.cdp_base.tabs.append(new_tab)
+                    self.driver.disconnect()
+                    self.switch_to_newest_tab()
+                    self.open(url)
+                    return
+                elif getattr(sb_config, "guest_mode", None):
+                    print("  open_new_tab() failed! (Known Guest Mode issue)")
+            if switch_to:
+                self.switch_to_newest_tab()
+            return
+
+        target_id = self.loop.run_until_complete(
+            self.page.send(mycdp.target.create_target(url))
+        )
+        if not target_id and getattr(sb_config, "guest_mode", None):
+            print("  open_new_tab() failed! (Known Guest Mode issue)")
+        found_target = None
+        targets = self.loop.run_until_complete(
+            self.page.send(mycdp.target.get_targets())
+        )
+        if target_id:
+            for target in targets:
+                if str(target_id) in str(target):
+                    found_target = target
+                    break
+        if found_target:
+            tab_url = driver.tabs[0].websocket_url
+            pre_tab_url = tab_url.split("/page/")[0] + "/page/"
+            new_tab_url = pre_tab_url + target_id
+            new_tab = cdp_tab.Tab(new_tab_url, found_target, driver)
+            driver.targets.append(new_tab)
+            driver.tabs.append(new_tab)
         if switch_to:
             self.switch_to_newest_tab()
 
@@ -1102,7 +1320,14 @@ class CDPMethods():
             self.page.evaluate("window.location.origin")
         )
 
-    def get_page_source(self):
+    def get_html(self, include_shadow_dom=True):
+        return self.get_page_source(
+            include_shadow_dom=include_shadow_dom
+        )
+
+    def get_page_source(self, include_shadow_dom=True):
+        if include_shadow_dom:
+            return self.find_element("html").get_html()
         try:
             source = self.loop.run_until_complete(
                 self.page.evaluate("document.documentElement.outerHTML")
@@ -1227,15 +1452,23 @@ class CDPMethods():
         if not timeout:
             timeout = settings.SMALL_TIMEOUT
         selector = self.__convert_to_css_if_xpath(selector)
-        self.select(selector, timeout=timeout)
+        element = self.select(selector, timeout=timeout)
         self.__add_light_pause()
-        coordinates = self.loop.run_until_complete(
-            self.page.js_dumps(
-                """document.querySelector"""
-                """('%s').getBoundingClientRect()"""
-                % js_utils.escape_quotes_if_needed(re.escape(selector))
+        coordinates = None
+        if ":contains(" in selector:
+            position = element.get_position()
+            x = position.x
+            y = position.y
+            width = position.width
+            height = position.height
+            coordinates = {"x": x, "y": y, "width": width, "height": height}
+        else:
+            coordinates = self.loop.run_until_complete(
+                self.page.js_dumps(
+                    """document.querySelector('%s').getBoundingClientRect()"""
+                    % js_utils.escape_quotes_if_needed(re.escape(selector))
+                )
             )
-        )
         return coordinates
 
     def get_element_size(self, selector, timeout=None):
@@ -1269,6 +1502,17 @@ class CDPMethods():
         x = window_rect["x"] + element_rect["x"]
         y = w_bottom_y - viewport_height + element_rect["y"]
         y_scroll_offset = window_rect["pageYOffset"]
+        if (
+            hasattr(sb_config, "_cdp_browser")
+            and sb_config._cdp_browser == "opera"
+        ):
+            # Handle special case where Opera side panel shifts coordinates
+            x_offset = window_rect["outerWidth"] - window_rect["innerWidth"]
+            if x_offset > 56:
+                x_offset = 56
+            elif x_offset < 22:
+                x_offset = 0
+            x = x + x_offset
         y = y - y_scroll_offset
         x = x + window_rect["scrollX"]
         y = y + window_rect["scrollY"]
@@ -1301,6 +1545,8 @@ class CDPMethods():
         )
 
     def get_element_attribute(self, selector, attribute):
+        """Find an element and return the value of an attribute.
+        Raises an exception if there's no such element or attribute."""
         attributes = self.get_element_attributes(selector)
         with suppress(Exception):
             return attributes[attribute]
@@ -1311,16 +1557,91 @@ class CDPMethods():
         return value
 
     def get_attribute(self, selector, attribute):
+        """Find an element and return the value of an attribute.
+        If the element doesn't exist: Raises an exception.
+        If the attribute doesn't exist: Returns None."""
         return self.find_element(selector).get_attribute(attribute)
 
     def get_element_html(self, selector):
+        """Find an element and return the outerHTML."""
         selector = self.__convert_to_css_if_xpath(selector)
+        self.find_element(selector)
+        self.__add_light_pause()
         return self.loop.run_until_complete(
             self.page.evaluate(
                 """document.querySelector('%s').outerHTML"""
                 % js_utils.escape_quotes_if_needed(re.escape(selector))
             )
         )
+
+    def get_mfa_code(self, totp_key=None):
+        """Returns a time-based one-time password based on the Google
+        Authenticator algorithm for multi-factor authentication."""
+        return shared_utils.get_mfa_code(totp_key)
+
+    def enter_mfa_code(self, selector, totp_key=None, timeout=None):
+        if not timeout:
+            timeout = settings.SMALL_TIMEOUT
+        mfa_code = self.get_mfa_code(totp_key)
+        self.type(selector, mfa_code + "\n", timeout=timeout)
+
+    def activate_messenger(self):
+        js_utils.activate_messenger(self)
+        self.__add_light_pause()
+
+    def set_messenger_theme(
+        self, theme="default", location="default", max_messages="default"
+    ):
+        """Sets a theme for posting messages.
+        Themes: ["flat", "future", "block", "air", "ice"]
+        Locations: ["top_left", "top_center", "top_right",
+                    "bottom_left", "bottom_center", "bottom_right"]
+        max_messages: The limit of concurrent messages to display."""
+        if not theme:
+            theme = "default"  # "flat"
+        if not location:
+            location = "default"  # "bottom_right"
+        if not max_messages:
+            max_messages = "default"  # "8"
+        else:
+            max_messages = str(max_messages)  # Value must be in string format
+        js_utils.set_messenger_theme(
+            self,
+            theme=theme,
+            location=location,
+            max_messages=max_messages,
+        )
+        self.__add_light_pause()
+
+    def post_message(self, message, duration=None, pause=True, style="info"):
+        """Post a message on the screen with Messenger.
+        Arguments:
+            message: The message to display.
+            duration: The time until the message vanishes. (Default: 2.55s)
+            pause: If True, the program waits until the message completes.
+            style: "info", "success", or "error"."""
+        driver = self.driver
+        if hasattr(driver, "cdp_base"):
+            driver = driver.cdp_base
+        if style not in ["info", "success", "error"]:
+            style = "info"
+        if not duration:
+            duration = settings.DEFAULT_MESSAGE_DURATION
+        if (
+            (
+                driver.config.headless
+                or (hasattr(sb_config, "xvfb") and sb_config.xvfb)
+            )
+            and float(duration) > 0.75
+        ):
+            duration = 0.75
+        try:
+            js_utils.post_message(self, message, duration, style=style)
+        except Exception:
+            print(" * %s message: %s" % (style.upper(), message))
+        if pause:
+            duration = float(duration) + 0.15
+            time.sleep(float(duration))
 
     def set_locale(self, locale):
         """(Settings will take effect on the next page load)"""
@@ -1348,16 +1669,38 @@ class CDPMethods():
         css_selector = self.__convert_to_css_if_xpath(selector)
         css_selector = re.escape(css_selector)  # Add "\\" to special chars
         css_selector = js_utils.escape_quotes_if_needed(css_selector)
-        js_code = """var $elements = document.querySelectorAll('%s');
-                  var index = 0, length = $elements.length;
-                  for(; index < length; index++){
-                  $elements[index].setAttribute('%s','%s');}""" % (
-            css_selector,
-            attribute,
-            value,
+        js_code = (
+            """var $elements = document.querySelectorAll('%s');
+            var index = 0, length = $elements.length;
+            for(; index < length; index++){
+            $elements[index].setAttribute('%s','%s');}""" % (
+                css_selector,
+                attribute,
+                value,
+            )
         )
         with suppress(Exception):
             self.loop.run_until_complete(self.page.evaluate(js_code))
+
+    def is_attribute_present(self, selector, attribute, value=None):
+        try:
+            element = self.find_element(selector, timeout=0.1)
+            found_value = element.get_attribute(attribute)
+            if found_value is None:
+                return False
+            if value is not None:
+                if found_value == value:
+                    return True
+                else:
+                    return False
+            else:
+                return True
+        except Exception:
+            return False
+
+    def is_online(self):
+        js_code = "navigator.onLine;"
+        return self.loop.run_until_complete(self.page.evaluate(js_code))
 
     def __make_sure_pyautogui_lock_is_writable(self):
         with suppress(Exception):
@@ -1389,24 +1732,29 @@ class CDPMethods():
                 import pyautogui
                 with suppress(Exception):
                     use_pyautogui_ver = constants.PyAutoGUI.VER
-                    if pyautogui.__version__ != use_pyautogui_ver:
-                        del pyautogui
-                        shared_utils.pip_install(
-                            "pyautogui", version=use_pyautogui_ver
-                        )
+                    u_pv = shared_utils.make_version_tuple(use_pyautogui_ver)
+                    pv = shared_utils.make_version_tuple(pyautogui.__version__)
+                    if pv < u_pv:
+                        del pyautogui  # To get newer ver
+                        shared_utils.pip_install("pyautogui", version="Latest")
                         import pyautogui
             except Exception:
                 print("\nPyAutoGUI required! Installing now...")
-                shared_utils.pip_install(
-                    "pyautogui", version=constants.PyAutoGUI.VER
-                )
+                shared_utils.pip_install("pyautogui", version="Latest")
                 try:
                     import pyautogui
                 except Exception:
                     if (
                         shared_utils.is_linux()
-                        and (not sb_config.headed or sb_config.xvfb)
+                        and (
+                            not sb_config.headed
+                            or (hasattr(sb_config, "xvfb") and sb_config.xvfb)
+                        )
                         and not driver.config.headless
+                        and (
+                            not hasattr(sb_config, "_virtual_display")
+                            or not sb_config._virtual_display
+                        )
                     ):
                         from sbvirtualdisplay import Display
                         xvfb_width = 1366
@@ -1434,6 +1782,11 @@ class CDPMethods():
                                 backend="xvfb",
                                 use_xauth=True,
                             )
+                            if "--debug-display" in sys.argv:
+                                print(
+                                    "Starting VDisplay from sb_cdp: (%s, %s)"
+                                    % (xvfb_width, xvfb_height)
+                                )
                             xvfb_display.start()
 
     def __get_configured_pyautogui(self, pyautogui_copy):
@@ -1466,9 +1819,7 @@ class CDPMethods():
         self.__install_pyautogui_if_missing()
         import pyautogui
         pyautogui = self.__get_configured_pyautogui(pyautogui)
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:
             self.__make_sure_pyautogui_lock_is_writable()
             pyautogui.press(key)
@@ -1480,14 +1831,12 @@ class CDPMethods():
         self.__install_pyautogui_if_missing()
         import pyautogui
         pyautogui = self.__get_configured_pyautogui(pyautogui)
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:
             self.__make_sure_pyautogui_lock_is_writable()
             for key in keys:
                 pyautogui.press(key)
-                time.sleep(0.044)
+                time.sleep(float(0.042 + (random.random() / 110.0)))
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.sleep(0.025))
 
@@ -1495,9 +1844,7 @@ class CDPMethods():
         self.__install_pyautogui_if_missing()
         import pyautogui
         pyautogui = self.__get_configured_pyautogui(pyautogui)
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:
             self.__make_sure_pyautogui_lock_is_writable()
             pyautogui.write(text)
@@ -1516,9 +1863,7 @@ class CDPMethods():
                 % (x, y, screen_width, screen_height)
             )
         if uc_lock:
-            gui_lock = fasteners.InterProcessLock(
-                constants.MultiBrowser.PYAUTOGUILOCK
-            )
+            gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
             with gui_lock:  # Prevent issues with multiple processes
                 self.__make_sure_pyautogui_lock_is_writable()
                 pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
@@ -1537,9 +1882,7 @@ class CDPMethods():
             pyautogui.click(x=x, y=y)
 
     def gui_click_x_y(self, x, y, timeframe=0.25):
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:  # Prevent issues with multiple processes
             self.__make_sure_pyautogui_lock_is_writable()
             self.__install_pyautogui_if_missing()
@@ -1553,20 +1896,20 @@ class CDPMethods():
                 win_x = window_rect["x"]
                 win_y = window_rect["y"]
                 scr_width = pyautogui.size().width
-                self.maximize()
-                self.__add_light_pause()
-                win_width = self.get_window_size()["width"]
+                win_width = self.evaluate("screen.availWidth;")
                 width_ratio = round(float(scr_width) / float(win_width), 2)
                 width_ratio += 0.01
                 if width_ratio < 0.45 or width_ratio > 2.55:
                     width_ratio = 1.01
                 sb_config._saved_width_ratio = width_ratio
-                self.minimize()
-                self.__add_light_pause()
-                self.set_window_rect(win_x, win_y, width, height)
-                self.__add_light_pause()
-                x = x * width_ratio
-                y = y * width_ratio
+                with suppress(Exception):
+                    self.get_window()  # If this fails, skip the rest
+                    self.minimize()
+                    self.__add_light_pause()
+                    self.__set_window_rect(win_x, win_y, width, height)
+                    self.__add_light_pause()
+                x = x * (width_ratio + 0.03)
+                y = y * (width_ratio - 0.03)
             self.bring_active_window_to_front()
             self.__gui_click_x_y(x, y, timeframe=timeframe, uc_lock=False)
 
@@ -1577,6 +1920,413 @@ class CDPMethods():
         self.gui_click_x_y(x, y, timeframe=timeframe)
         self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.wait())
+
+    def gui_click_with_offset(
+        self, selector, x, y, timeframe=0.25, center=False
+    ):
+        """Click an element at an {X,Y}-offset location.
+        {0,0} is the top-left corner of the element.
+        If center==True, {0,0} becomes the center of the element.
+        The timeframe is the time spent moving the mouse."""
+        if center:
+            px, py = self.get_gui_element_center(selector)
+            self.gui_click_x_y(px + x, py + y, timeframe=timeframe)
+        else:
+            element_rect = self.get_gui_element_rect(selector)
+            px = element_rect["x"]
+            py = element_rect["y"]
+            self.gui_click_x_y(px + x, py + y, timeframe=timeframe)
+
+    def click_with_offset(self, selector, x, y, center=False):
+        element = self.find_element(selector)
+        element.scroll_into_view()
+        if "--debug" in sys.argv:
+            displayed_selector = "`%s`" % selector
+            if '"' not in selector:
+                displayed_selector = '"%s"' % selector
+            elif "'" not in selector:
+                displayed_selector = "'%s'" % selector
+            print(
+                " <DEBUG> sb.click_with_offset(%s, %s, %s, center=%s)"
+                % (displayed_selector, x, y, center)
+            )
+        element.click_with_offset(x=x, y=y, center=center)
+        self.__slow_mode_pause_if_set()
+        self.loop.run_until_complete(self.page.wait())
+
+    def _on_a_cf_turnstile_page(self, source=None):
+        if not source or len(source) < 400:
+            time.sleep(0.2)
+            source = self.get_page_source()
+        if (
+            (
+                'data-callback="onCaptchaSuccess"' in source
+                and 'title="reCAPTCHA"' not in source
+                and 'id="recaptcha-token"' not in source
+            )
+            or "/challenge-platform/h/b/" in source
+            or 'id="challenge-widget-' in source
+            or "challenges.cloudf" in source
+            or "cf-turnstile-" in source
+        ):
+            return True
+        return False
+
+    def _on_an_incapsula_hcaptcha_page(self, *args, **kwargs):
+        self.loop.run_until_complete(self.page.wait())
+        if (
+            self.is_element_visible('iframe[src*="_Incapsula_Resource?"]')
+            or self.is_element_visible("iframe[data-hcaptcha-widget-id]")
+        ):
+            return True
+        return False
+
+    def _on_a_datadome_slider_page(self, *args, **kwargs):
+        self.loop.run_until_complete(self.page.wait())
+        if (
+            self.is_element_visible(
+                'body > iframe[src*="/geo.captcha-delivery.com/captcha/"]'
+            )
+        ):
+            return True
+        return False
+
+    def _on_a_g_recaptcha_page(self, *args, **kwargs):
+        time.sleep(0.4)  # reCAPTCHA may need a moment to appear
+        self.loop.run_until_complete(self.page.wait())
+        source = self.get_page_source()
+        if (
+            (
+                'id="recaptcha-token"' in source
+                or 'title="reCAPTCHA"' in source
+            )
+            and self.is_element_visible('iframe[title="reCAPTCHA"]')
+        ):
+            try:
+                self.loop.run_until_complete(self.page.wait(0.1))
+            except Exception:
+                time.sleep(0.1)
+            return True
+        elif "com/recaptcha/api.js" in source:
+            time.sleep(1.2)  # Maybe still loading
+            try:
+                self.loop.run_until_complete(self.page.wait(0.1))
+            except Exception:
+                time.sleep(0.1)
+            return True
+        return False
+
+    def __gui_click_recaptcha(self, use_cdp=False):
+        selector = None
+        if self.is_element_visible('iframe[title="reCAPTCHA"]'):
+            selector = 'iframe[title="reCAPTCHA"]'
+        else:
+            return False
+        time.sleep(0.25)
+        self.loop.run_until_complete(self.page.wait())
+        time.sleep(0.25)
+        with suppress(Exception):
+            element_rect = self.get_element_rect(selector, timeout=0.1)
+            e_x = element_rect["x"]
+            e_y = element_rect["y"]
+            window_rect = self.get_window_rect()
+            win_width = window_rect["innerWidth"]
+            win_height = window_rect["innerHeight"]
+            if (
+                e_x > 1040
+                and e_y > 640
+                and abs(win_width - e_x) < 110
+                and abs(win_height - e_y) < 110
+            ):
+                # Probably the invisible reCAPTCHA in the bottom right corner
+                return False
+            gui_element_rect = self.get_gui_element_rect(selector, timeout=1)
+            gui_e_x = gui_element_rect["x"]
+            gui_e_y = gui_element_rect["y"]
+            x_offset = 26
+            y_offset = 35
+            if shared_utils.is_windows():
+                x_offset = 29
+            x = gui_e_x + x_offset
+            y = gui_e_y + y_offset
+            sb_config._saved_cf_x_y = (x, y)
+            time.sleep(0.08)
+            if use_cdp:
+                self.sleep(0.03)
+                gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+                with gui_lock:  # Prevent issues with multiple processes
+                    self.bring_active_window_to_front()
+                    time.sleep(0.056)
+                    self.click_with_offset(selector, x_offset, y_offset)
+                    time.sleep(0.056)
+            else:
+                self.gui_click_x_y(x, y)
+            return True
+        return False
+
+    def __gui_slide_datadome_captcha(self):
+        iframe = 'body > iframe[src*="/geo.captcha-delivery.com/captcha/"]'
+        if not self.is_element_visible(iframe):
+            return False
+        src = self.get_attribute(iframe, "src")
+        tab = self.get_active_tab()
+        self.open_new_tab(url=src)
+        time.sleep(0.41)
+        self.loop.run_until_complete(self.page.wait())
+        time.sleep(0.25)
+        x1, y1 = self.get_gui_element_center("div.slider")
+        x2, y2 = self.get_gui_element_center("div.sliderTarget")
+        self.close_active_tab()
+        self.switch_to_tab(tab)
+        self.gui_drag_drop_points(x1, y1, x2, y2, timeframe=0.55)
+        time.sleep(0.25)
+        self.loop.run_until_complete(self.page.wait())
+        time.sleep(0.15)
+        return True
+
+    def __cdp_click_incapsula_hcaptcha(self):
+        selector = "iframe[data-hcaptcha-widget-id]"
+        if self.is_element_visible('iframe[src*="_Incapsula_Resource?"]'):
+            outer_selector = 'iframe[src*="_Incapsula_Resource?"]'
+            element = self.get_nested_element(outer_selector, selector)
+            if not element:
+                return False
+        elif self.is_element_visible(selector):
+            element = self.select(selector, timeout=0.1)
+            if not element:
+                return False
+        else:
+            return False
+        time.sleep(0.05)
+        self.loop.run_until_complete(self.page.wait())
+        time.sleep(0.05)
+        x_offset = 30
+        y_offset = 36
+        was_clicked = False
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+        with gui_lock:  # Prevent issues with multiple processes
+            self.bring_active_window_to_front()
+            time.sleep(0.056)
+            if "--debug" in sys.argv:
+                displayed_selector = "`%s`" % selector
+                if '"' not in selector:
+                    displayed_selector = '"%s"' % selector
+                elif "'" not in selector:
+                    displayed_selector = "'%s'" % selector
+                print(
+                    " <DEBUG> click_with_offset(%s, %s, %s)"
+                    % (displayed_selector, x_offset, y_offset)
+                )
+            with suppress(Exception):
+                element.click_with_offset(x_offset, y_offset)
+                was_clicked = True
+                time.sleep(0.075)
+        if was_clicked:
+            # Wait a moment for the click to succeed
+            time.sleep(0.75)
+            self.__slow_mode_pause_if_set()
+            self.loop.run_until_complete(self.page.wait())
+            if "--debug" in sys.argv:
+                print(" <DEBUG> hCaptcha was clicked!")
+            return True
+        if "--debug" in sys.argv:
+            print(" <DEBUG> hCaptcha was NOT clicked!")
+        return False
+
+    def solve_captcha(self):
+        self.__click_captcha(use_cdp=True)
+
+    def click_captcha(self):
+        """Same as solve_captcha()"""
+        self.__click_captcha(use_cdp=True)
+
+    def gui_click_captcha(self):
+        """Use PyAutoGUI to click the CAPTCHA"""
+        self.__click_captcha(use_cdp=False)
+
+    def __click_captcha(self, use_cdp=False):
+        """Uses PyAutoGUI unless use_cdp == True"""
+        self.sleep(0.075)
+        self.loop.run_until_complete(self.page.wait())
+        self.sleep(0.025)
+        source = self.get_page_source()
+        if self._on_a_cf_turnstile_page(source):
+            pass
+        elif self._on_a_g_recaptcha_page(source):
+            result = self.__gui_click_recaptcha(use_cdp)
+            return result
+        elif self._on_an_incapsula_hcaptcha_page():
+            result = self.__cdp_click_incapsula_hcaptcha()
+            return result
+        elif self._on_a_datadome_slider_page():
+            result = self.__gui_slide_datadome_captcha()
+            return result
+        else:
+            return False
+        selector = None
+        if self.is_element_present('[class="cf-turnstile"]'):
+            selector = '[class="cf-turnstile"]'
+        elif self.is_element_present("#challenge-form div > div"):
+            selector = "#challenge-form div > div"
+        elif self.is_element_present('[style="display: grid;"] div div'):
+            selector = '[style="display: grid;"] div div'
+        elif self.is_element_present("[class*=spacer] + div div"):
+            selector = '[class*=spacer] + div div'
+        elif self.is_element_present(".spacer div:not([class])"):
+            selector = ".spacer div:not([class])"
+        elif self.is_element_present('[data-testid*="challenge-"] div'):
+            selector = '[data-testid*="challenge-"] div'
+        elif self.is_element_present("div#turnstile-widget div:not([class])"):
+            selector = "div#turnstile-widget div:not([class])"
+        elif self.is_element_present("ngx-turnstile div:not([class])"):
+            selector = "ngx-turnstile div:not([class])"
+        elif self.is_element_present(
+            'form div:not([class]):has(input[name*="cf-turn"])'
+        ):
+            selector = 'form div:not([class]):has(input[name*="cf-turn"])'
+        elif self.is_element_present("form div:not(:has(*))"):
+            selector = "form div:not(:has(*))"
+        elif self.is_element_present("body > div#check > div:not([class])"):
+            selector = "body > div#check > div:not([class])"
+        elif self.is_element_present(".cf-turnstile-wrapper"):
+            selector = ".cf-turnstile-wrapper"
+        elif self.is_element_present(
+            '[id*="turnstile"] div:not([class])'
+        ):
+            selector = '[id*="turnstile"] div:not([class])'
+        elif self.is_element_present(
+            '[class*="turnstile"] div:not([class])'
+        ):
+            selector = '[class*="turnstile"] div:not([class])'
+        elif self.is_element_present(
+            "iframe[data-hcaptcha-widget-id]"
+        ):
+            selector = "iframe[data-hcaptcha-widget-id]"
+        elif self.is_element_present(
+            '[data-callback="onCaptchaSuccess"]'
+        ):
+            selector = '[data-callback="onCaptchaSuccess"]'
+        elif self.is_element_present(
+            "div:not([class]):not([id]):not([aria-label]) > "
+            "div:not([class]):not([id]):not([aria-label])"
+        ):
+            selector = (
+                "div:not([class]):not([id]):not([aria-label]) > "
+                "div:not([class]):not([id]):not([aria-label])"
+            )
+        else:
+            return False
+        if not selector:
+            return False
+        if (
+            self.is_element_present("form")
+            and (
+                self.is_element_present('form[class*="center"]')
+                or self.is_element_present('form[class*="right"]')
+                or self.is_element_present('form div[class*="center"]')
+                or self.is_element_present('form div[class*="right"]')
+            )
+        ):
+            script = (
+                """var $elements = document.querySelectorAll(
+                'form[class], form div[class]');
+                var index = 0, length = $elements.length;
+                for(; index < length; index++){
+                the_class = $elements[index].getAttribute('class');
+                new_class = the_class.replaceAll('center', 'left');
+                new_class = new_class.replaceAll('right', 'left');
+                $elements[index].setAttribute('class', new_class);}"""
+            )
+            with suppress(Exception):
+                self.loop.run_until_complete(self.page.evaluate(script))
+                self.loop.run_until_complete(self.page.wait())
+        elif (
+            self.is_element_present("form")
+            and (
+                self.is_element_present('form div[style*="center"]')
+                or self.is_element_present('form div[style*="right"]')
+            )
+        ):
+            script = (
+                """var $elements = document.querySelectorAll(
+                'form[style], form div[style]');
+                var index = 0, length = $elements.length;
+                for(; index < length; index++){
+                the_style = $elements[index].getAttribute('style');
+                new_style = the_style.replaceAll('center', 'left');
+                new_style = new_style.replaceAll('right', 'left');
+                $elements[index].setAttribute('style', new_style);}"""
+            )
+            with suppress(Exception):
+                self.loop.run_until_complete(self.page.evaluate(script))
+                self.loop.run_until_complete(self.page.wait())
+        elif (
+            self.is_element_present(
+                'form [id*="turnstile"] div:not([class])'
+            )
+            or self.is_element_present(
+                'form [class*="turnstile"] div:not([class])'
+            )
+        ):
+            script = (
+                """var $elements = document.querySelectorAll(
+                'form [id*="turnstile"]');
+                var index = 0, length = $elements.length;
+                for(; index < length; index++){
+                $elements[index].setAttribute('align', 'left');}
+                var $elements = document.querySelectorAll(
+                'form [class*="turnstile"]');
+                var index = 0, length = $elements.length;
+                for(; index < length; index++){
+                $elements[index].setAttribute('align', 'left');}"""
+            )
+            with suppress(Exception):
+                self.loop.run_until_complete(self.page.evaluate(script))
+                self.loop.run_until_complete(self.page.wait())
+        elif (
+            self.is_element_present(
+                '[style*="text-align: center;"] div:not([class])'
+            )
+        ):
+            script = (
+                """var $elements = document.querySelectorAll(
+                '[style*="text-align: center;"]');
+                var index = 0, length = $elements.length;
+                for(; index < length; index++){
+                the_style = $elements[index].getAttribute('style');
+                new_style = the_style.replaceAll('center', 'left');
+                $elements[index].setAttribute('style', new_style);}"""
+            )
+            with suppress(Exception):
+                self.loop.run_until_complete(self.page.evaluate(script))
+                self.loop.run_until_complete(self.page.wait())
+        with suppress(Exception):
+            time.sleep(0.05)
+            element_rect = self.get_gui_element_rect(selector, timeout=1)
+            e_x = element_rect["x"]
+            e_y = element_rect["y"]
+            x_offset = 28
+            y_offset = 32
+            if shared_utils.is_windows():
+                y_offset = 28
+            x = e_x + x_offset
+            y = e_y + y_offset
+            sb_config._saved_cf_x_y = (x, y)
+            time.sleep(0.05)
+            if hasattr(sb_config, "_cdp_proxy") and sb_config._cdp_proxy:
+                time.sleep(0.22)  # CAPTCHA may load slower with proxy
+            if use_cdp:
+                self.sleep(0.03)
+                gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+                with gui_lock:  # Prevent issues with multiple processes
+                    self.bring_active_window_to_front()
+                    time.sleep(0.05)
+                    self.click_with_offset(selector, x_offset, y_offset)
+                    time.sleep(0.05)
+            else:
+                self.gui_click_x_y(x, y)
+            return True
+        return False
 
     def __gui_drag_drop(self, x1, y1, x2, y2, timeframe=0.25, uc_lock=False):
         self.__install_pyautogui_if_missing()
@@ -1596,17 +2346,19 @@ class CDPMethods():
                 % (x2, y2, screen_width, screen_height)
             )
         if uc_lock:
-            gui_lock = fasteners.InterProcessLock(
-                constants.MultiBrowser.PYAUTOGUILOCK
-            )
+            gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
             with gui_lock:  # Prevent issues with multiple processes
+                if "--debug" in sys.argv:
+                    print(" <DEBUG> pyautogui.moveTo(%s, %s)" % (x1, y1))
                 pyautogui.moveTo(x1, y1, 0.25, pyautogui.easeOutQuad)
                 self.__add_light_pause()
                 if "--debug" in sys.argv:
-                    print(" <DEBUG> pyautogui.moveTo(%s, %s)" % (x1, y1))
+                    print(" <DEBUG> pyautogui.dragTo(%s, %s)" % (x2, y2))
                 pyautogui.dragTo(x2, y2, button="left", duration=timeframe)
         else:
             # Called from a method where the gui_lock is already active
+            if "--debug" in sys.argv:
+                print(" <DEBUG> pyautogui.moveTo(%s, %s)" % (x1, y1))
             pyautogui.moveTo(x1, y1, 0.25, pyautogui.easeOutQuad)
             self.__add_light_pause()
             if "--debug" in sys.argv:
@@ -1614,9 +2366,9 @@ class CDPMethods():
             pyautogui.dragTo(x2, y2, button="left", duration=timeframe)
 
     def gui_drag_drop_points(self, x1, y1, x2, y2, timeframe=0.35):
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        """Use PyAutoGUI to drag-and-drop from one point to another.
+        Can simulate click-and-hold when using the same point twice."""
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:  # Prevent issues with multiple processes
             self.__install_pyautogui_if_missing()
             import pyautogui
@@ -1629,22 +2381,22 @@ class CDPMethods():
                 win_x = window_rect["x"]
                 win_y = window_rect["y"]
                 scr_width = pyautogui.size().width
-                self.maximize()
-                self.__add_light_pause()
-                win_width = self.get_window_size()["width"]
+                win_width = self.evaluate("screen.availWidth;")
                 width_ratio = round(float(scr_width) / float(win_width), 2)
                 width_ratio += 0.01
                 if width_ratio < 0.45 or width_ratio > 2.55:
                     width_ratio = 1.01
                 sb_config._saved_width_ratio = width_ratio
-                self.minimize()
-                self.__add_light_pause()
-                self.set_window_rect(win_x, win_y, width, height)
-                self.__add_light_pause()
+                with suppress(Exception):
+                    self.get_window()  # If this fails, skip the rest
+                    self.minimize()
+                    self.__add_light_pause()
+                    self.__set_window_rect(win_x, win_y, width, height)
+                    self.__add_light_pause()
                 x1 = x1 * width_ratio
-                y1 = y1 * width_ratio
+                y1 = y1 * (width_ratio - 0.02)
                 x2 = x2 * width_ratio
-                y2 = y2 * width_ratio
+                y2 = y2 * (width_ratio - 0.02)
             self.bring_active_window_to_front()
             self.__gui_drag_drop(
                 x1, y1, x2, y2, timeframe=timeframe, uc_lock=False
@@ -1653,6 +2405,8 @@ class CDPMethods():
         self.loop.run_until_complete(self.page.wait())
 
     def gui_drag_and_drop(self, drag_selector, drop_selector, timeframe=0.35):
+        """Use PyAutoGUI to drag-and-drop from one selector to another.
+        Can simulate click-and-hold when using the same selector twice."""
         self.__slow_mode_pause_if_set()
         self.bring_active_window_to_front()
         x1, y1 = self.get_gui_element_center(drag_selector)
@@ -1660,6 +2414,14 @@ class CDPMethods():
         x2, y2 = self.get_gui_element_center(drop_selector)
         self.__add_light_pause()
         self.gui_drag_drop_points(x1, y1, x2, y2, timeframe=timeframe)
+
+    def gui_click_and_hold(self, selector, timeframe=0.35):
+        """Use PyAutoGUI to click-and-hold a selector."""
+        self.__slow_mode_pause_if_set()
+        self.bring_active_window_to_front()
+        x, y = self.get_gui_element_center(selector)
+        self.__add_light_pause()
+        self.gui_drag_drop_points(x, y, x, y, timeframe=timeframe)
 
     def __gui_hover_x_y(self, x, y, timeframe=0.25, uc_lock=False):
         self.__install_pyautogui_if_missing()
@@ -1673,25 +2435,21 @@ class CDPMethods():
                 % (x, y, screen_width, screen_height)
             )
         if uc_lock:
-            gui_lock = fasteners.InterProcessLock(
-                constants.MultiBrowser.PYAUTOGUILOCK
-            )
+            gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
             with gui_lock:  # Prevent issues with multiple processes
-                pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
-                time.sleep(0.056)
                 if "--debug" in sys.argv:
                     print(" <DEBUG> pyautogui.moveTo(%s, %s)" % (x, y))
+                pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
+                time.sleep(0.056)
         else:
             # Called from a method where the gui_lock is already active
-            pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
-            time.sleep(0.056)
             if "--debug" in sys.argv:
                 print(" <DEBUG> pyautogui.moveTo(%s, %s)" % (x, y))
+            pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
+            time.sleep(0.056)
 
     def gui_hover_x_y(self, x, y, timeframe=0.25):
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:  # Prevent issues with multiple processes
             self.__install_pyautogui_if_missing()
             import pyautogui
@@ -1716,15 +2474,14 @@ class CDPMethods():
                     width_ratio = sb_config._saved_width_ratio
                 else:
                     scr_width = pyautogui.size().width
-                    self.maximize()
-                    self.__add_light_pause()
-                    win_width = self.get_window_size()["width"]
+                    win_width = self.evaluate("screen.availWidth;")
                     width_ratio = round(float(scr_width) / float(win_width), 2)
                     width_ratio += 0.01
                     if width_ratio < 0.45 or width_ratio > 2.55:
                         width_ratio = 1.01
                     sb_config._saved_width_ratio = width_ratio
-                self.set_window_rect(win_x, win_y, width, height)
+                with suppress(Exception):
+                    self.__set_window_rect(win_x, win_y, width, height)
                 self.__add_light_pause()
                 self.bring_active_window_to_front()
             elif (
@@ -1750,14 +2507,40 @@ class CDPMethods():
         if width > 0 and height > 0:
             x, y = self.get_gui_element_center(selector)
             self.bring_active_window_to_front()
-            self.__gui_hover_x_y(x, y, timeframe=timeframe)
+            self.__gui_hover_x_y(x, y, timeframe=timeframe, uc_lock=False)
             self.__slow_mode_pause_if_set()
         self.loop.run_until_complete(self.page.wait())
 
+    def hover_element(self, selector, timeframe=0.25):
+        element = self.select(selector)
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+        with gui_lock:
+            self.bring_active_window_to_front()
+            self.sleep(0.02)
+            element.mouse_move()
+            self.sleep(timeframe)
+
+    def hover_and_click(self, hover_selector, click_selector):
+        if getattr(sb_config, "_cdp_mobile_mode", None):
+            self.select(click_selector).click()
+            return
+        hover_element = self.select(hover_selector)
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
+        with gui_lock:
+            self.bring_active_window_to_front()
+            self.sleep(0.02)
+            hover_element.mouse_move()
+            self.sleep(0.25)
+            try:
+                self.click(click_selector, timeout=0.5)
+            except Exception:
+                self.select(click_selector, timeout=2).click()
+
     def gui_hover_and_click(self, hover_selector, click_selector):
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        if getattr(sb_config, "_cdp_mobile_mode", None):
+            self.select(click_selector).click()
+            return
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:
             self.__make_sure_pyautogui_lock_is_writable()
             self.bring_active_window_to_front()
@@ -1917,6 +2700,10 @@ class CDPMethods():
             time.sleep(0.1)
         raise Exception("Element {%s} was not visible!" % selector)
 
+    def wait_for_element(self, selector, **kwargs):
+        """Same as wait_for_element_visible()"""
+        return self.wait_for_element_visible(selector, **kwargs)
+
     def wait_for_element_not_visible(self, selector, timeout=None):
         """Wait for element to not be visible on page. (May still be in DOM)"""
         if not timeout:
@@ -1960,6 +2747,150 @@ class CDPMethods():
             "Element {%s} was still present after %s second%s!"
             % (selector, timeout, plural)
         )
+
+    def wait_for_any_of_elements_visible(self, *args, **kwargs):
+        """Waits for at least one of the elements to be visible.
+        Returns the first element that is found.
+        The input is a list of elements. (Should be CSS selectors)
+        Optional kwargs include: "timeout" (used by all selectors).
+        Raises an exception if no elements are visible by the timeout.
+        Examples:
+            sb.cdp.wait_for_any_of_elements_visible("h1", "h2", "h3")
+            OR
+            sb.cdp.wait_for_any_of_elements_visible(["h1", "h2", "h3"]) """
+        selectors = []
+        timeout = None
+        for kwarg in kwargs:
+            if kwarg == "timeout":
+                timeout = kwargs["timeout"]
+            elif kwarg == "by":
+                pass  # Autodetected
+            elif kwarg == "selector" or kwarg == "selectors":
+                selector = kwargs[kwarg]
+                if isinstance(selector, str):
+                    selectors.append(selector)
+                elif isinstance(selector, list):
+                    selectors_list = selector
+                    for selector in selectors_list:
+                        if isinstance(selector, str):
+                            selectors.append(selector)
+            else:
+                raise Exception('Unknown kwarg: "%s"!' % kwarg)
+        if not timeout:
+            timeout = settings.SMALL_TIMEOUT
+        for arg in args:
+            if isinstance(arg, list):
+                for selector in arg:
+                    if isinstance(selector, str):
+                        selectors.append(selector)
+            elif isinstance(arg, str):
+                selectors.append(arg)
+        if not selectors:
+            raise Exception("The selectors list was empty!")
+        start_ms = time.time() * 1000.0
+        stop_ms = start_ms + (timeout * 1000.0)
+        any_present = False
+        for i in range(int(timeout * 10)):
+            for selector in selectors:
+                if self.is_element_visible(selector):
+                    return self.select(selector)
+                if self.is_element_present(selector):
+                    any_present = True
+            now_ms = time.time() * 1000.0
+            if now_ms >= stop_ms:
+                break
+            time.sleep(0.1)
+        plural = "s"
+        if timeout == 1:
+            plural = ""
+        if not any_present:
+            # None of the elements exist in the HTML
+            raise Exception(
+                "None of the elements {%s} were present after %s second%s!" % (
+                    str(selectors),
+                    timeout,
+                    plural,
+                )
+            )
+        raise Exception(
+            "None of the elements %s were visible after %s second%s!" % (
+                str(selectors),
+                timeout,
+                plural,
+            )
+        )
+
+    def wait_for_any_of_elements_present(self, *args, **kwargs):
+        """Waits for at least one of the elements to be present.
+        Visibility not required, but element must be in the DOM.
+        Returns the first element that is found.
+        The input is a list of elements. (Should be CSS selectors)
+        Optional kwargs include: "timeout" (used by all selectors).
+        Raises an exception if no elements are present by the timeout.
+        Examples:
+            self.wait_for_any_of_elements_present("style", "script")
+            OR
+            self.wait_for_any_of_elements_present(["style", "script"]) """
+        selectors = []
+        timeout = None
+        for kwarg in kwargs:
+            if kwarg == "timeout":
+                timeout = kwargs["timeout"]
+            elif kwarg == "by":
+                pass  # Autodetected
+            elif kwarg == "selector" or kwarg == "selectors":
+                selector = kwargs[kwarg]
+                if isinstance(selector, str):
+                    selectors.append(selector)
+                elif isinstance(selector, list):
+                    selectors_list = selector
+                    for selector in selectors_list:
+                        if isinstance(selector, str):
+                            selectors.append(selector)
+            else:
+                raise Exception('Unknown kwarg: "%s"!' % kwarg)
+        if not timeout:
+            timeout = settings.SMALL_TIMEOUT
+        for arg in args:
+            if isinstance(arg, list):
+                for selector in arg:
+                    if isinstance(selector, str):
+                        selectors.append(selector)
+            elif isinstance(arg, str):
+                selectors.append(arg)
+        if not selectors:
+            raise Exception("The selectors list was empty!")
+        start_ms = time.time() * 1000.0
+        stop_ms = start_ms + (timeout * 1000.0)
+        for i in range(int(timeout * 10)):
+            for selector in selectors:
+                if self.is_element_present(selector):
+                    return self.select(selector)
+            now_ms = time.time() * 1000.0
+            if now_ms >= stop_ms:
+                break
+            time.sleep(0.1)
+        plural = "s"
+        if timeout == 1:
+            plural = ""
+        # None of the elements exist in the HTML
+        raise Exception(
+            "None of the elements %s were present after %s second%s!" % (
+                str(selectors),
+                timeout,
+                plural,
+            )
+        )
+
+    def assert_any_of_elements_visible(self, *args, **kwargs):
+        """Like wait_for_any_of_elements_visible(), but returns nothing."""
+        self.wait_for_any_of_elements_visible(*args, **kwargs)
+        return True
+
+    def assert_any_of_elements_present(self, *args, **kwargs):
+        """Like wait_for_any_of_elements_present(), but returns nothing."""
+        self.wait_for_any_of_elements_present(*args, **kwargs)
+        return True
 
     def assert_element(self, selector, timeout=None):
         """Same as assert_element_visible()"""
@@ -2150,6 +3081,13 @@ class CDPMethods():
             self.loop.run_until_complete(self.page.evaluate(js_code))
             self.loop.run_until_complete(self.page.wait())
 
+    def scroll_by_y(self, y):
+        y = int(y)
+        js_code = "window.scrollBy(0, %s);" % y
+        with suppress(Exception):
+            self.loop.run_until_complete(self.page.evaluate(js_code))
+            self.loop.run_until_complete(self.page.wait())
+
     def scroll_to_top(self):
         js_code = "window.scrollTo(0, 0);"
         with suppress(Exception):
@@ -2163,12 +3101,55 @@ class CDPMethods():
             self.loop.run_until_complete(self.page.wait())
 
     def scroll_up(self, amount=25):
-        self.loop.run_until_complete(self.page.scroll_up(amount))
+        """Scrolls up as a percentage of the page."""
+        try:
+            self.loop.run_until_complete(self.page.scroll_up(amount))
+        except Exception:
+            amount = self.get_window_size()["height"] * amount / 100
+            self.execute_script("window.scrollBy(0, -%s);" % amount)
         self.loop.run_until_complete(self.page.wait())
 
     def scroll_down(self, amount=25):
-        self.loop.run_until_complete(self.page.scroll_down(amount))
+        """Scrolls down as a percentage of the page."""
+        try:
+            self.loop.run_until_complete(self.page.scroll_down(amount))
+        except Exception:
+            amount = self.get_window_size()["height"] * amount / 100
+            self.execute_script("window.scrollBy(0, %s);" % amount)
         self.loop.run_until_complete(self.page.wait())
+
+    def save_page_source(self, name, folder=None):
+        from seleniumbase.core import log_helper
+        if not name.endswith(".html"):
+            name = name + ".html"
+        if folder:
+            abs_path = os.path.abspath(".")
+            file_path = os.path.join(abs_path, folder)
+            if not os.path.exists(file_path):
+                os.makedirs(file_path)
+            html_file_path = os.path.join(file_path, name)
+        else:
+            html_file_path = name
+        page_source = self.get_page_source()
+        last_page = self.get_current_url()
+        meta_charset = '<meta charset="utf-8">'
+        rendered_source = ""
+        if "://" in last_page:
+            base_href_html = log_helper.get_base_href_html(last_page)
+            if ' charset="' not in page_source:
+                rendered_source = "%s\n%s\n%s" % (
+                    base_href_html, meta_charset, page_source
+                )
+            else:
+                rendered_source = "%s\n%s" % (base_href_html, page_source)
+        else:
+            rendered_source = page_source
+        html_file = open(html_file_path, mode="w+", encoding="utf-8")
+        html_file.write(rendered_source)
+        html_file.close()
+
+    def save_as_html(self, *args, **kwargs):
+        self.save_page_source(*args, **kwargs)
 
     def save_screenshot(self, name, folder=None, selector=None):
         filename = name
@@ -2181,12 +3162,32 @@ class CDPMethods():
         else:
             self.select(selector).save_screenshot(filename)
 
+    def print_to_pdf(self, name, folder=None):
+        filename = name
+        if folder:
+            filename = os.path.join(folder, name)
+        self.loop.run_until_complete(self.page.print_to_pdf(filename))
+
+    def save_as_pdf(self, *args, **kwargs):
+        self.print_to_pdf(*args, **kwargs)
+
 
 class Chrome(CDPMethods):
     def __init__(self, url=None, **kwargs):
         if not url:
             url = "about:blank"
-        loop = asyncio.new_event_loop()
         driver = cdp_util.start_sync(**kwargs)
+        loop = asyncio.new_event_loop()
         page = loop.run_until_complete(driver.get(url))
+        wait_timeout = 30.0
+        if hasattr(sb_config, "_cdp_proxy") and sb_config._cdp_proxy:
+            wait_timeout = 45.0
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(page.wait(), timeout=wait_timeout)
+            )
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            pass
         super().__init__(loop, page, driver)

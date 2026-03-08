@@ -1,6 +1,6 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) 📑 Presenter 🎞️
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> 📑 Presenter 🎞️</h2>
 
 <p>SeleniumBase Presenter (slide-maker) lets you use Python to generate HTML presentations.</p>
 
@@ -16,12 +16,12 @@ Slides can include HTML, code, images, and iframes.
 
 Here's how to run the example presentation:
 
-```bash
+```zsh
 cd examples/presenter
 pytest my_presentation.py
 ```
 
-**Here's a presentation with a chart:**
+<b>Here's a presentation with a chart:</b>
 
 <a href="https://seleniumbase.github.io/other/core_presentation.html"><img width="428" src="https://seleniumbase.github.io/other/sb_core_areas.png" title="Screenshot"></a><br>
 
@@ -31,7 +31,7 @@ pytest my_presentation.py
 
 Here's how to run that example:
 
-```bash
+```zsh
 cd examples/presenter
 pytest core_presentation.py
 ```
@@ -223,7 +223,7 @@ class MyPresenterClass(BaseCase):
 
 That example is from [my_presentation.py](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/presenter/my_presentation.py), which you can run from the ``examples/presenter`` folder with the following command:
 
-```bash
+```zsh
 pytest my_presentation.py
 ```
 

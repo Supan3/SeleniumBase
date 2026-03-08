@@ -30,12 +30,6 @@ sb_config.rec_subprocess_used = False
 sys_executable = sys.executable
 if " " in sys_executable:
     sys_executable = "python"
-if sys.version_info <= (3, 8):
-    current_version = ".".join(str(ver) for ver in sys.version_info[:3])
-    raise Exception(
-        "\n* Recorder Desktop requires Python 3.8 or newer!"
-        "\n*** You are currently using Python %s" % current_version
-    )
 
 
 def set_colors(use_colors):
@@ -150,6 +144,16 @@ def do_recording(file_name, url, overwrite_enabled, use_chrome, window):
             )
         if not use_chrome:
             command += " --edge"
+        elif "--opera" in command_args:
+            command += " --opera"
+        elif "--brave" in command_args:
+            command += " --brave"
+        elif "--comet" in command_args:
+            command += " --comet"
+        elif "--atlas" in command_args:
+            command += " --atlas"
+        elif "--use-chromium" in command_args:
+            command += " --use-chromium"
         if (
             "--uc" in command_args
             or "--cdp" in command_args
@@ -232,10 +236,37 @@ def create_tkinter_gui():
     chk = tk.Checkbutton(window, text="Overwrite existing files", variable=cbx)
     chk.pack()
     chk.select()
+    use_stealth = False
+    command_args = sys.argv[2:]
+    if (
+        "--uc" in command_args
+        or "--cdp" in command_args
+        or "--undetected" in command_args
+        or "--undetectable" in command_args
+    ):
+        use_stealth = True
+    browser_display = "Use Chrome over Edge"
+    if "--opera" in command_args:
+        browser_display = "Use Opera over Edge"
+    elif "--brave" in command_args:
+        browser_display = "Use Brave over Edge"
+    elif "--comet" in command_args:
+        browser_display = "Use Comet over Edge"
+    elif "--atlas" in command_args:
+        browser_display = "Use Atlas over Edge"
     cbb = tk.IntVar()
-    chkb = tk.Checkbutton(window, text="Use Chrome over Edge", variable=cbb)
-    chkb.pack()
-    chkb.select()
+    if not use_stealth:
+        chkb = tk.Checkbutton(window, text=browser_display, variable=cbb)
+        chkb.pack()
+        if "--edge" not in command_args:
+            chkb.select()
+    else:
+        chkb = tk.Checkbutton(
+            window, text="Stealthy Chrome Mode", variable=cbb
+        )
+        chkb.pack()
+        chkb.select()
+        chkb.config(state=tk.DISABLED)
     tk.Label(window, text="").pack()
     url = tk.StringVar()
     tk.Label(window, text="Enter the URL to start recording on:").pack()

@@ -2,7 +2,7 @@
 
 <p align="center"><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/cdn/img/sb_word_cloud.png" alt="SeleniumBase" title="SeleniumBase" width="330" /></a></p>
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Help Docs
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> Help Docs</h2>
 
 <p align="left">
 <a href="https://seleniumbase.io/#python_installation">🚀 Start</a> |
@@ -14,7 +14,7 @@
 <a href="https://seleniumbase.io/examples/ReadMe/">📚 Examples</a> |
 <a href="https://seleniumbase.io/help_docs/mobile_testing/">📱 Emulator</a>
 <br />
-<a href="https://seleniumbase.io/seleniumbase/console_scripts/ReadMe/">🌠 Console Scripts</a> |
+<a href="https://seleniumbase.io/seleniumbase/console_scripts/ReadMe/">🪄 Console Scripts</a> |
 <a href="https://seleniumbase.io/seleniumbase/utilities/selenium_grid/ReadMe/">🌐 Grid</a>
 <br />
 <a href="https://seleniumbase.io/help_docs/method_summary/">📘 Methods / APIs</a> |
@@ -26,14 +26,16 @@
 <a href="https://github.com/seleniumbase/SeleniumBase/tree/master/examples/boilerplates">♻️ Boilerplates</a> |
 <a href="https://seleniumbase.io/help_docs/locale_codes/">🗾 Locale Codes</a>
 <br />
-<a href="https://seleniumbase.io/help_docs/js_package_manager/">🕹️ JS Manager</a> |
+<a href="https://seleniumbase.io/help_docs/js_package_manager/">❇️ JS Manager</a> |
 <a href="https://seleniumbase.io/examples/visual_testing/ReadMe/">🖼️ Visual Testing</a>
 <br />
 <a href="https://seleniumbase.io/help_docs/translations/">🌏 Translator</a> |
 <a href="https://seleniumbase.io/examples/dialog_boxes/ReadMe/">🛂 Dialog Boxes</a>
 <br />
 <a href="https://seleniumbase.io/help_docs/recorder_mode/">🔴 Recorder</a> |
-<a href="https://seleniumbase.io/devices/?url=seleniumbase.io">💻 Device Farm</a>
+<a href="https://seleniumbase.io/devices/?url=seleniumbase.io">🖥️ Device Farm</a>
+<br />
+<a href="https://github.com/seleniumbase/SeleniumBase/blob/master/examples/cdp_mode/playwright/ReadMe.md">🎭 Stealthy Playwright Mode</a>
 <br />
 <a href="https://seleniumbase.io/examples/presenter/ReadMe/">🎞️ Slides</a> |
 <a href="https://seleniumbase.io/examples/chart_maker/ReadMe/">📶 Chart Maker</a>

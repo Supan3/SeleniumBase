@@ -1,6 +1,6 @@
 <!-- SeleniumBase Docs -->
 
-[<img src="https://seleniumbase.github.io/cdn/img/super_logo_sb.png" title="SeleniumBase" width="290">](https://github.com/seleniumbase/SeleniumBase/blob/master/README.md)
+<a href="https://github.com/seleniumbase/SeleniumBase/blob/master/README.md"><img src="https://seleniumbase.github.io/cdn/img/super_logo_sb.png" title="SeleniumBase" width="290"></a>
 
 <h2><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="28" /> The Selenium Grid Hub:</h2>
 
@@ -12,7 +12,7 @@ The following commands will work once you've installed seleniumbase.
 
 <h4><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="28" /> Downloading the Selenium Server JAR file:</h4>
 
-```bash
+```zsh
 seleniumbase download server
 ```
 
@@ -20,7 +20,7 @@ seleniumbase download server
 
 <h4><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="28" /> Grid Hub server controls:</h4>
 
-```bash
+```zsh
 seleniumbase grid-hub {start|stop|restart} [OPTIONS]
 ```
 
@@ -32,7 +32,7 @@ seleniumbase grid-hub {start|stop|restart} [OPTIONS]
 
 <h4><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="28" /> Grid node server controls:</h4>
 
-```bash
+```zsh
 seleniumbase grid-node {start|stop|restart} --hub=[HUB_IP] [OPTIONS]
 ```
 
@@ -46,7 +46,7 @@ When the Grid Hub Console is up and running, you'll be able to find it here: [ht
 
 Now you can run your tests on the Selenium Grid:
 
-```bash
+```zsh
 pytest test_demo_site.py --server=IP_ADDRESS --port=4444
 ```
 
@@ -54,20 +54,20 @@ You can also run your tests on someone else's Selenium Grid to avoid managing yo
 
 * [BrowserStack](https://www.browserstack.com/automate#) Selenium Grid:
 
-```bash
+```zsh
 pytest test_demo_site.py --server=USERNAME:KEY@hub.browserstack.com --port=80
 ```
 
 * [Sauce Labs](https://saucelabs.com/products/platform-configurator) Selenium Grid:
 
-```bash
+```zsh
 pytest test_demo_site.py --server=USERNAME:KEY@ondemand.us-east-1.saucelabs.com --port=443 --protocol=https
 ```
 
-To use a server on the ``https`` protocol, add ``--protocol=https``:
-(<i>SeleniumBase 1.65.2 and newer uses ``https`` automatically for ``--port=443``.</i>)
+To use the `https` protocol, add `--protocol=https`:
+(<i>`https` is the default protocol for `--port=443`.</i>)
 
-```bash
+```zsh
 pytest test_demo_site.py --protocol=https --server=IP_ADDRESS --port=PORT
 ```
 

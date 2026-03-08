@@ -19,8 +19,8 @@ class DatabaseManager:
             constants.PipInstall.FINDLOCK
         )
         with pip_find_lock:
-            if sys.version_info >= (3, 7) and sys.version_info < (3, 9):
-                # Fix bug in newer cryptography for Python 3.7 and 3.8:
+            if sys.version_info < (3, 9):
+                # Fix bug with newer cryptography on Python 3.8:
                 # "pyo3_runtime.PanicException: Python API call failed"
                 # (Match the version needed for pdfminer.six functions)
                 try:
@@ -42,7 +42,7 @@ class DatabaseManager:
         db_user = settings.DB_USERNAME
         db_pass = settings.DB_PASSWORD
         db_schema = settings.DB_SCHEMA
-        if hasattr(sb_config, "settings_file") and sb_config.settings_file:
+        if getattr(sb_config, "settings_file", None):
             override = settings_parser.set_settings(sb_config.settings_file)
             if "DB_HOST" in override.keys():
                 db_server = override["DB_HOST"]

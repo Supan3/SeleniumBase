@@ -1,12 +1,12 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Installing webdrivers
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> Installing webdrivers</h2>
 
 To run web automation, you need webdrivers for each browser you plan on using.  With SeleniumBase, drivers are downloaded automatically (as needed) into the SeleniumBase `drivers/` folder.
 
 🎛️ You can also download drivers manually with these commands:
 
-```bash
+```zsh
 seleniumbase get chromedriver
 seleniumbase get geckodriver
 seleniumbase get edgedriver
@@ -18,7 +18,7 @@ If the necessary driver is not found in this location while running tests, Selen
 
 🎛️ You can also download specific versions of drivers. Examples:
 
-```bash
+```zsh
 sbase get chromedriver 114
 sbase get chromedriver 114.0.5735.90
 sbase get chromedriver stable
@@ -50,7 +50,7 @@ Here's where you can go to manually get web drivers from the source:
 
 🎛️ You can also install drivers by using ``brew`` (aka ``homebrew``):
 
-```bash
+```zsh
 brew install --cask chromedriver
 
 brew install geckodriver
@@ -58,7 +58,7 @@ brew install geckodriver
 
 🎛️ You can also upgrade existing webdrivers:
 
-```bash
+```zsh
 brew upgrade --cask chromedriver
 
 brew upgrade geckodriver
@@ -68,14 +68,14 @@ brew upgrade geckodriver
 
 🎛️ If you still need drivers, these scripts download `chromedriver` and `geckodriver` to a Linux machine:
 
-```bash
+```zsh
 wget https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriver_linux64.zip
 unzip chromedriver_linux64.zip
 mv chromedriver /usr/local/bin/
 chmod +x /usr/local/bin/chromedriver
 ```
 
-```bash
+```zsh
 wget https://github.com/mozilla/geckodriver/releases/download/v0.35.0/geckodriver-v0.35.0-linux64.tar.gz
 tar xvfz geckodriver-v0.35.0-linux64.tar.gz
 mv geckodriver /usr/local/bin/
@@ -90,7 +90,7 @@ To verify that web drivers are working, **[follow these instructions](https://gi
 
 🎛️ Use the `sbase get` command to download the `Chrome for Testing` and `Chrome-Headless-Shell` browser binaries. Example:
 
-```bash
+```zsh
 sbase get cft  # (For `Chrome for Testing`)
 sbase get chs  # (For `Chrome-Headless-Shell`)
 ```
@@ -102,4 +102,4 @@ To use the binaries from there in SeleniumBase scripts, set the `binary_location
 
 --------
 
-[<img src="https://seleniumbase.github.io/cdn/img/sb_logo_b.png" title="SeleniumBase" width="280">](https://github.com/seleniumbase/SeleniumBase)
+<a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/cdn/img/sb_logo_b.png" title="SeleniumBase" width="280"></a>

@@ -1,6 +1,6 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) 📊 ChartMaker 📶
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> 📊 ChartMaker 📶</h2>
 
 <p>SeleniumBase ChartMaker lets you use Python to generate HTML charts.</p>
 
@@ -10,7 +10,7 @@
 
 Here's how to run a simple pie chart presentation from [GitHub => seleniumbase/SeleniumBase/examples/chart_maker](https://github.com/seleniumbase/SeleniumBase/tree/master/examples/chart_maker):
 
-```bash
+```zsh
 cd examples/chart_maker
 pytest my_chart.py
 ```
@@ -34,7 +34,7 @@ class MyChartMakerClass(BaseCase):
 
 Here's how to run an example presentation with multiple charts:
 
-```bash
+```zsh
 cd examples/chart_maker
 pytest chart_presentation.py
 ```
@@ -78,7 +78,7 @@ class MyChartMakerClass(BaseCase):
 
 This example is from [test_line_chart.py](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/chart_maker/test_line_chart.py), which you can run from the ``examples/chart_maker`` folder with the following command:
 
-```bash
+```zsh
 pytest test_line_chart.py
 ```
 
@@ -128,7 +128,7 @@ class MyChartMakerClass(BaseCase):
 
 Here's how to run that example:
 
-```bash
+```zsh
 cd examples/chart_maker
 pytest chart_presentation.py
 ```

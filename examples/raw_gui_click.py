@@ -1,17 +1,21 @@
-import sys
 from seleniumbase import SB
 
-# An bad UserAgent forces CAPTCHA-solving on macOS
-agent = "cool"
-if "linux" in sys.platform or "win32" in sys.platform:
-    agent = None  # Use the default UserAgent
-
-with SB(uc=True, test=True, rtf=True, agent=agent) as sb:
-    url = "https://gitlab.com/users/sign_in"
-    sb.uc_open_with_reconnect(url)
-    sb.uc_gui_click_captcha()  # Only if needed
-    sb.assert_element('label[for="user_login"]')
-    sb.assert_element('input[data-testid*="username"]')
-    sb.assert_element('input[data-testid*="password"]')
-    sb.set_messenger_theme(location="bottom_center")
-    sb.post_message("SeleniumBase wasn't detected!")
+with SB(uc=True, test=True) as sb:
+    url = "seleniumbase.io/apps/form_turnstile"
+    sb.activate_cdp_mode(url)
+    sb.press_keys("#name", "SeleniumBase")
+    sb.press_keys("#email", "test@test.test")
+    sb.press_keys("#phone", "1-555-555-5555")
+    sb.click('[for="date"]')
+    sb.click("td.is-today button")
+    sb.click('div[class="select-wrapper"] input')
+    sb.click('span:contains("9:00 PM")')
+    sb.highlight_click('input[value="AR"] + span')
+    sb.click('input[value="cc"] + span')
+    sb.scroll_to('div[class*="cf-turnstile"]')
+    sb.scroll_down(40)
+    sb.uc_gui_click_captcha()
+    sb.highlight("img#captcha-success", timeout=3)
+    sb.highlight_click('button:contains("Request & Pay")')
+    sb.highlight("img#submit-success")
+    sb.highlight('button:contains("Success!")')

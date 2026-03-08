@@ -1,4 +1,5 @@
 import fasteners
+import json
 import logging
 import os
 import platform
@@ -11,6 +12,7 @@ import types
 import urllib3
 import warnings
 from contextlib import suppress
+from filelock import FileLock
 from selenium import webdriver
 from selenium.common.exceptions import ElementClickInterceptedException
 from selenium.common.exceptions import InvalidSessionIdException
@@ -24,6 +26,13 @@ from selenium.webdriver.safari.service import Service as SafariService
 from seleniumbase import config as sb_config
 from seleniumbase import decorators
 from seleniumbase import drivers  # webdriver storage folder for SeleniumBase
+from seleniumbase.drivers import cft_drivers  # chrome-for-testing
+from seleniumbase.drivers import chs_drivers  # chrome-headless-shell
+from seleniumbase.drivers import opera_drivers  # still uses chromedriver
+from seleniumbase.drivers import brave_drivers  # still uses chromedriver
+from seleniumbase.drivers import comet_drivers  # still uses chromedriver
+from seleniumbase.drivers import atlas_drivers  # still uses chromedriver
+from seleniumbase.drivers import chromium_drivers  # still uses chromedriver
 from seleniumbase import extensions  # browser extensions storage folder
 from seleniumbase.config import settings
 from seleniumbase.core import detect_b_ver
@@ -38,6 +47,15 @@ from seleniumbase.fixtures import shared_utils
 
 urllib3.disable_warnings()
 DRIVER_DIR = os.path.dirname(os.path.realpath(drivers.__file__))
+DRIVER_DIR_CFT = os.path.dirname(os.path.realpath(cft_drivers.__file__))
+DRIVER_DIR_CHS = os.path.dirname(os.path.realpath(chs_drivers.__file__))
+DRIVER_DIR_OPERA = os.path.dirname(os.path.realpath(opera_drivers.__file__))
+DRIVER_DIR_BRAVE = os.path.dirname(os.path.realpath(brave_drivers.__file__))
+DRIVER_DIR_COMET = os.path.dirname(os.path.realpath(comet_drivers.__file__))
+DRIVER_DIR_ATLAS = os.path.dirname(os.path.realpath(atlas_drivers.__file__))
+DRIVER_DIR_CHROMIUM = os.path.dirname(
+    os.path.realpath(chromium_drivers.__file__)
+)
 # Make sure that the SeleniumBase DRIVER_DIR is at the top of the System PATH
 # (Changes to the System PATH with os.environ only last during the test run)
 if not os.environ["PATH"].startswith(DRIVER_DIR):
@@ -90,13 +108,42 @@ else:
 def log_d(message):
     """If setting sb_config.settings.HIDE_DRIVER_DOWNLOADS to True,
     output from driver downloads are logged instead of printed."""
-    if (
-        hasattr(settings, "HIDE_DRIVER_DOWNLOADS")
-        and settings.HIDE_DRIVER_DOWNLOADS
-    ):
+    if getattr(settings, "HIDE_DRIVER_DOWNLOADS", None):
         logging.debug(message)
     else:
         print(message)
+
+
+def override_driver_dir(driver_dir):
+    if (
+        driver_dir
+        and isinstance(driver_dir, str)
+        and os.path.exists(driver_dir)
+    ):
+        driver_dir = os.path.realpath(driver_dir)
+        sb_config.settings.NEW_DRIVER_DIR = driver_dir
+        if (
+            not os.environ["PATH"].startswith(driver_dir)
+            and len(driver_dir) >= 4
+        ):
+            os.environ["PATH"] = os.environ["PATH"].replace(driver_dir, "")
+            os.environ["PATH"] = os.environ["PATH"].replace(
+                os.pathsep + os.pathsep, os.pathsep
+            )
+            os.environ["PATH"] = driver_dir + os.pathsep + os.environ["PATH"]
+    elif (
+        not driver_dir
+        or not isinstance(driver_dir, str)
+        or not os.path.exists(driver_dir)
+    ):
+        bad_dir = ""
+        if driver_dir and isinstance(driver_dir, str):
+            bad_dir = os.path.realpath(driver_dir)
+        log_d(
+            "\n* Warning: Cannot set driver_dir to nonexistent directory:\n%s"
+            "\n* Will use the default folder instead:\n%s"
+            % (bad_dir, DRIVER_DIR)
+        )
 
 
 def make_driver_executable_if_not(driver_path):
@@ -107,13 +154,27 @@ def make_driver_executable_if_not(driver_path):
         shared_utils.make_executable(driver_path)
 
 
-def extend_driver(driver, proxy_auth=False, use_uc=True):
+def extend_driver(
+    driver, proxy_auth=False, use_uc=True, recorder_ext=False
+):
     # Extend the driver with new methods
     driver.default_find_element = driver.find_element
     driver.default_find_elements = driver.find_elements
+    driver.default_add_cookie = driver.add_cookie
+    driver.default_get_cookie = driver.get_cookie
+    driver.default_delete_cookie = driver.delete_cookie
+    driver.default_back = driver.back
+    driver.default_forward = driver.forward
+    driver.default_refresh = driver.refresh
     DM = sb_driver.DriverMethods(driver)
     driver.find_element = DM.find_element
     driver.find_elements = DM.find_elements
+    driver.add_cookie = DM.add_cookie
+    driver.get_cookie = DM.get_cookie
+    driver.delete_cookie = DM.delete_cookie
+    driver.back = DM.back
+    driver.forward = DM.forward
+    driver.refresh = DM.refresh
     driver.locator = DM.locator
     page = types.SimpleNamespace()
     page.open = DM.open_url
@@ -188,6 +249,8 @@ def extend_driver(driver, proxy_auth=False, use_uc=True):
     driver.wait_for_element = DM.wait_for_element
     driver.wait_for_element_visible = DM.wait_for_element_visible
     driver.wait_for_element_present = DM.wait_for_element_present
+    driver.wait_for_element_absent = DM.wait_for_element_absent
+    driver.wait_for_element_not_visible = DM.wait_for_element_not_visible
     driver.wait_for_selector = DM.wait_for_selector
     driver.wait_for_text = DM.wait_for_text
     driver.wait_for_exact_text = DM.wait_for_exact_text
@@ -233,14 +296,34 @@ def extend_driver(driver, proxy_auth=False, use_uc=True):
     driver.switch_to_tab = DM.switch_to_tab
     driver.switch_to_frame = DM.switch_to_frame
     driver.reset_window_size = DM.reset_window_size
+    if recorder_ext:
+        from seleniumbase.js_code.recorder_js import recorder_js
+        recorder_code = (
+            """window.onload = function() { %s };""" % recorder_js
+        )
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": recorder_code}
+        )
     if hasattr(driver, "proxy"):
         driver.set_wire_proxy = DM.set_wire_proxy
+    completed_loads = []
+    for ext_dir in sb_config._ext_dirs:
+        if ext_dir not in completed_loads:
+            completed_loads.append(ext_dir)
+            if not use_uc and os.path.exists(os.path.realpath(ext_dir)):
+                with suppress(Exception):
+                    driver.webextension.install(os.path.realpath(ext_dir))
+    driver._is_using_auth = False
     if proxy_auth:
+        driver._is_using_auth = True
+        if not use_uc and os.path.exists(proxy_helper.PROXY_DIR_PATH):
+            with suppress(Exception):
+                driver.webextension.install(proxy_helper.PROXY_DIR_PATH)
         # Proxy needs a moment to load in Manifest V3
         if use_uc:
-            time.sleep(0.12)
+            time.sleep(0.14)
         else:
-            time.sleep(0.22)
+            time.sleep(0.28)
     return driver
 
 
@@ -290,12 +373,14 @@ def chromedriver_on_path():
     return None
 
 
-def get_uc_driver_version(full=False):
+def get_uc_driver_version(full=False, local_uc_driver=None):
+    if not local_uc_driver:
+        local_uc_driver = LOCAL_UC_DRIVER
     uc_driver_version = None
-    if os.path.exists(LOCAL_UC_DRIVER):
+    if os.path.exists(local_uc_driver):
         with suppress(Exception):
             output = subprocess.check_output(
-                '"%s" --version' % LOCAL_UC_DRIVER, shell=True
+                '"%s" --version' % local_uc_driver, shell=True
             )
             if IS_WINDOWS:
                 output = output.decode("latin1")
@@ -359,16 +444,16 @@ def has_captcha(text):
         "<title>403 Forbidden</title>" in text
         or "Permission Denied</title>" in text
         or 'id="challenge-error-text"' in text
+        or "/challenge-platform/h/b/" in text
         or "<title>Just a moment..." in text
         or 'action="/?__cf_chl_f_tk' in text
         or 'id="challenge-widget-' in text
         or 'src="chromedriver.js"' in text
+        or "com/recaptcha/api.js" in text
         or 'class="g-recaptcha"' in text
         or 'content="Pixelscan"' in text
         or 'id="challenge-form"' in text
-        or "/challenge-platform" in text
         or "window._cf_chl_opt" in text
-        or "/recaptcha/api.js" in text
         or "/turnstile/" in text
     ):
         return True
@@ -380,6 +465,18 @@ def __is_cdp_swap_needed(driver):
     return shared_utils.is_cdp_swap_needed(driver)
 
 
+def uc_execute_cdp_cmd(driver, *args, **kwargs):
+    if not driver.is_connected():
+        driver.connect()
+    return driver.default_execute_cdp_cmd(*args, **kwargs)
+
+
+def updated_get(driver, url):
+    if url and ":" not in url and "." in url:
+        url = "https:" + url
+    driver.default_get(url)
+
+
 def uc_special_open_if_cf(
     driver,
     url,
@@ -389,6 +486,8 @@ def uc_special_open_if_cf(
     device_height=None,
     device_pixel_ratio=None,
 ):
+    if url and ":" not in url and "." in url:
+        url = "https:" + url
     if url.startswith("http:") or url.startswith("https:"):
         special = False
         with suppress(Exception):
@@ -403,7 +502,7 @@ def uc_special_open_if_cf(
                 special = True
                 if status_str == "403" or status_str == "429":
                     time.sleep(0.06)  # Forbidden / Blocked! (Wait first!)
-        if special:
+        if special and not hasattr(driver, "cdp_base"):
             time.sleep(0.05)
             with driver:
                 driver.execute_script('window.open("%s","_blank");' % url)
@@ -471,9 +570,12 @@ def uc_open_with_tab(driver, url):
         time.sleep(0.3)
         return
     if (url.startswith("http:") or url.startswith("https:")):
-        with driver:
-            driver.execute_script('window.open("%s","_blank");' % url)
-            driver.close()
+        if not hasattr(driver, "cdp_base"):
+            with driver:
+                driver.execute_script('window.open("%s","_blank");' % url)
+                driver.close()
+        else:
+            driver.cdp.open(url)
         page_actions.switch_to_window(driver, driver.window_handles[-1], 2)
     else:
         driver.default_get(url)  # The original one
@@ -482,6 +584,19 @@ def uc_open_with_tab(driver, url):
 
 def uc_open_with_reconnect(driver, url, reconnect_time=None):
     """Open a url, disconnect chromedriver, wait, and reconnect."""
+    if (
+        hasattr(sb_config, "_cdp_browser")
+        and sb_config._cdp_browser in ["comet", "opera", "atlas"]
+    ):
+        if not __is_cdp_swap_needed(driver):
+            if not driver.current_url.startswith(
+                ("about", "data", "chrome")
+            ):
+                driver.get("about:blank")
+            uc_activate_cdp_mode(driver, url)
+        else:
+            driver.cdp.open(url)
+        return
     url = shared_utils.fix_url_as_needed(url)
     if __is_cdp_swap_needed(driver):
         driver.cdp.get(url)
@@ -491,9 +606,12 @@ def uc_open_with_reconnect(driver, url, reconnect_time=None):
         reconnect_time = constants.UC.RECONNECT_TIME
     if (url.startswith("http:") or url.startswith("https:")):
         script = 'window.open("%s","_blank");' % url
-        driver.execute_script(script)
-        time.sleep(0.05)
-        driver.close()
+        if not hasattr(driver, "cdp_base"):
+            driver.execute_script(script)
+            time.sleep(0.05)
+            driver.close()
+        else:
+            driver.cdp.open(url)
         if reconnect_time == "disconnect":
             driver.disconnect()
             time.sleep(0.008)
@@ -514,7 +632,8 @@ def uc_open_with_reconnect(driver, url, reconnect_time=None):
     return None
 
 
-def uc_open_with_cdp_mode(driver, url=None):
+def uc_open_with_cdp_mode(driver, url=None, **kwargs):
+    """Activate CDP Mode with the URL and kwargs."""
     import asyncio
     from seleniumbase.undetected.cdp_driver import cdp_util
 
@@ -525,11 +644,6 @@ def uc_open_with_cdp_mode(driver, url=None):
         driver.connect()
         current_url = driver.current_url
     url_protocol = current_url.split(":")[0]
-    if url_protocol not in ["about", "data", "chrome"]:
-        script = 'window.open("data:,","_blank");'
-        js_utils.call_me_later(driver, script, 3)
-        time.sleep(0.012)
-        driver.close()
     driver.disconnect()
 
     cdp_details = driver._get_cdp_details()
@@ -542,15 +656,36 @@ def uc_open_with_cdp_mode(driver, url=None):
     if url_protocol not in ["about", "data", "chrome"]:
         safe_url = False
 
+    if (
+        getattr(driver, "_is_using_cdp", None)
+        and getattr(driver, "cdp", None)
+        and hasattr(driver.cdp, "loop")
+    ):
+        # CDP Mode was already initialized
+        driver.cdp.open(url, **kwargs)
+        if not safe_url:
+            time.sleep(constants.UC.CDP_MODE_OPEN_WAIT)
+            if IS_WINDOWS:
+                time.sleep(constants.UC.EXTRA_WINDOWS_WAIT)
+        else:
+            time.sleep(0.012)
+        return
+
     headless = False
     headed = None
     xvfb = None
+    xvfb_metrics = None
+    binary_location = None
     if hasattr(sb_config, "headless"):
         headless = sb_config.headless
     if hasattr(sb_config, "headed"):
         headed = sb_config.headed
     if hasattr(sb_config, "xvfb"):
         xvfb = sb_config.xvfb
+    if hasattr(sb_config, "xvfb_metrics"):
+        xvfb_metrics = sb_config.xvfb_metrics
+    if hasattr(sb_config, "binary_location"):
+        binary_location = sb_config.binary_location
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -561,11 +696,14 @@ def uc_open_with_cdp_mode(driver, url=None):
             headless=headless,
             headed=headed,
             xvfb=xvfb,
+            xvfb_metrics=xvfb_metrics,
+            browser_executable_path=binary_location,
+            mobile=getattr(sb_config, "_cdp_mobile_mode", None),
         )
     )
     loop.run_until_complete(driver.cdp_base.wait(0))
 
-    gui_lock = fasteners.InterProcessLock(constants.MultiBrowser.PYAUTOGUILOCK)
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
 
     if (
         "chrome-extension://" in str(driver.cdp_base.main_tab)
@@ -602,7 +740,9 @@ def uc_open_with_cdp_mode(driver, url=None):
                 loop.run_until_complete(page_tab.activate())
 
     loop.run_until_complete(driver.cdp_base.update_targets())
-    page = loop.run_until_complete(driver.cdp_base.get(url))
+    page = loop.run_until_complete(
+        driver.cdp_base.get(url, **kwargs)
+    )
     with gui_lock:
         with suppress(Exception):
             shared_utils.make_writable(constants.MultiBrowser.PYAUTOGUILOCK)
@@ -622,6 +762,11 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.refresh = CDPM.refresh
     cdp.add_handler = CDPM.add_handler
     cdp.get_event_loop = CDPM.get_event_loop
+    cdp.get_rd_host = CDPM.get_rd_host
+    cdp.get_rd_port = CDPM.get_rd_port
+    cdp.get_rd_url = CDPM.get_rd_url
+    cdp.get_endpoint_url = CDPM.get_endpoint_url
+    cdp.get_port = CDPM.get_port
     cdp.find_element = CDPM.find_element
     cdp.find = CDPM.find_element
     cdp.locator = CDPM.find_element
@@ -639,6 +784,9 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.go_forward = CDPM.go_forward
     cdp.get_navigation_history = CDPM.get_navigation_history
     cdp.tile_windows = CDPM.tile_windows
+    cdp.grant_permissions = CDPM.grant_permissions
+    cdp.grant_all_permissions = CDPM.grant_all_permissions
+    cdp.reset_permissions = CDPM.reset_permissions
     cdp.get_all_cookies = CDPM.get_all_cookies
     cdp.set_all_cookies = CDPM.set_all_cookies
     cdp.save_cookies = CDPM.save_cookies
@@ -653,6 +801,7 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.click_active_element = CDPM.click_active_element
     cdp.click_if_visible = CDPM.click_if_visible
     cdp.click_visible_elements = CDPM.click_visible_elements
+    cdp.click_with_offset = CDPM.click_with_offset
     cdp.mouse_click = CDPM.mouse_click
     cdp.get_parent = CDPM.get_parent
     cdp.remove_element = CDPM.remove_element
@@ -661,29 +810,44 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.send_keys = CDPM.send_keys
     cdp.press_keys = CDPM.press_keys
     cdp.type = CDPM.type
+    cdp.clear_input = CDPM.clear_input
+    cdp.clear = CDPM.clear_input
     cdp.set_value = CDPM.set_value
     cdp.submit = CDPM.submit
     cdp.evaluate = CDPM.evaluate
+    cdp.execute_script = CDPM.execute_script
     cdp.js_dumps = CDPM.js_dumps
     cdp.maximize = CDPM.maximize
     cdp.minimize = CDPM.minimize
     cdp.medimize = CDPM.medimize
     cdp.set_window_rect = CDPM.set_window_rect
     cdp.reset_window_size = CDPM.reset_window_size
+    cdp.activate_messenger = CDPM.activate_messenger
+    cdp.set_messenger_theme = CDPM.set_messenger_theme
+    cdp.post_message = CDPM.post_message
     cdp.set_locale = CDPM.set_locale
     cdp.set_local_storage_item = CDPM.set_local_storage_item
     cdp.set_session_storage_item = CDPM.set_session_storage_item
     cdp.set_attributes = CDPM.set_attributes
+    cdp.is_attribute_present = CDPM.is_attribute_present
+    cdp.is_online = CDPM.is_online
+    cdp.solve_captcha = CDPM.solve_captcha
+    cdp.click_captcha = CDPM.click_captcha
     cdp.gui_press_key = CDPM.gui_press_key
     cdp.gui_press_keys = CDPM.gui_press_keys
     cdp.gui_write = CDPM.gui_write
     cdp.gui_click_x_y = CDPM.gui_click_x_y
     cdp.gui_click_element = CDPM.gui_click_element
+    cdp.gui_click_with_offset = CDPM.gui_click_with_offset
+    cdp.gui_click_captcha = CDPM.gui_click_captcha
     cdp.gui_drag_drop_points = CDPM.gui_drag_drop_points
     cdp.gui_drag_and_drop = CDPM.gui_drag_and_drop
+    cdp.gui_click_and_hold = CDPM.gui_click_and_hold
     cdp.gui_hover_x_y = CDPM.gui_hover_x_y
     cdp.gui_hover_element = CDPM.gui_hover_element
     cdp.gui_hover_and_click = CDPM.gui_hover_and_click
+    cdp.hover_element = CDPM.hover_element
+    cdp.hover_and_click = CDPM.hover_and_click
     cdp.internalize_links = CDPM.internalize_links
     cdp.open_new_window = CDPM.open_new_window
     cdp.switch_to_window = CDPM.switch_to_window
@@ -704,6 +868,7 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.get_element_position = CDPM.get_element_position
     cdp.get_gui_element_rect = CDPM.get_gui_element_rect
     cdp.get_gui_element_center = CDPM.get_gui_element_center
+    cdp.get_html = CDPM.get_html
     cdp.get_page_source = CDPM.get_page_source
     cdp.get_user_agent = CDPM.get_user_agent
     cdp.get_cookie_string = CDPM.get_cookie_string
@@ -721,8 +886,12 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.get_screen_rect = CDPM.get_screen_rect
     cdp.get_window_rect = CDPM.get_window_rect
     cdp.get_window_size = CDPM.get_window_size
+    cdp.get_mfa_code = CDPM.get_mfa_code
     cdp.nested_click = CDPM.nested_click
     cdp.select_option_by_text = CDPM.select_option_by_text
+    cdp.select_option_by_index = CDPM.select_option_by_index
+    cdp.select_option_by_value = CDPM.select_option_by_value
+    cdp.enter_mfa_code = CDPM.enter_mfa_code
     cdp.flash = CDPM.flash
     cdp.highlight = CDPM.highlight
     cdp.focus = CDPM.focus
@@ -741,8 +910,17 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.wait_for_text = CDPM.wait_for_text
     cdp.wait_for_text_not_visible = CDPM.wait_for_text_not_visible
     cdp.wait_for_element_visible = CDPM.wait_for_element_visible
+    cdp.wait_for_element = CDPM.wait_for_element
     cdp.wait_for_element_not_visible = CDPM.wait_for_element_not_visible
     cdp.wait_for_element_absent = CDPM.wait_for_element_absent
+    cdp.wait_for_any_of_elements_visible = (
+        CDPM.wait_for_any_of_elements_visible
+    )
+    cdp.wait_for_any_of_elements_present = (
+        CDPM.wait_for_any_of_elements_present
+    )
+    cdp.assert_any_of_elements_visible = CDPM.assert_any_of_elements_visible
+    cdp.assert_any_of_elements_present = CDPM.assert_any_of_elements_present
     cdp.assert_element = CDPM.assert_element
     cdp.assert_element_visible = CDPM.assert_element_visible
     cdp.assert_element_present = CDPM.assert_element_present
@@ -764,11 +942,16 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.assert_not_in = CDPM.assert_not_in
     cdp.scroll_into_view = CDPM.scroll_into_view
     cdp.scroll_to_y = CDPM.scroll_to_y
+    cdp.scroll_by_y = CDPM.scroll_by_y
     cdp.scroll_to_top = CDPM.scroll_to_top
     cdp.scroll_to_bottom = CDPM.scroll_to_bottom
     cdp.scroll_up = CDPM.scroll_up
     cdp.scroll_down = CDPM.scroll_down
+    cdp.save_page_source = CDPM.save_page_source
+    cdp.save_as_html = CDPM.save_as_html
     cdp.save_screenshot = CDPM.save_screenshot
+    cdp.print_to_pdf = CDPM.print_to_pdf
+    cdp.save_as_pdf = CDPM.save_as_pdf
     cdp.page = page  # async world
     cdp.driver = driver.cdp_base  # async world
     cdp.tab = cdp.page  # shortcut (original)
@@ -782,11 +965,21 @@ def uc_open_with_cdp_mode(driver, url=None):
     cdp.core = core_items
     cdp.loop = cdp.get_event_loop()
     driver.cdp = cdp
+    driver.solve_captcha = CDPM.solve_captcha
+    driver.click_captcha = CDPM.click_captcha
+    driver.find_element_by_text = CDPM.find_element_by_text
     driver._is_using_cdp = True
+    if (
+        getattr(sb_config, "_cdp_proxy", None)
+        and "@" in sb_config._cdp_proxy
+    ):
+        time.sleep(0.077)
+        loop.run_until_complete(page.wait(0.25))
+        time.sleep(0.022)
 
 
-def uc_activate_cdp_mode(driver, url=None):
-    uc_open_with_cdp_mode(driver, url=url)
+def uc_activate_cdp_mode(driver, url=None, **kwargs):
+    uc_open_with_cdp_mode(driver, url=url, **kwargs)
 
 
 def uc_open_with_disconnect(driver, url, timeout=None):
@@ -857,7 +1050,7 @@ def uc_click(
 def verify_pyautogui_has_a_headed_browser(driver):
     """PyAutoGUI requires a headed browser so that it can
     focus on the correct element when performing actions."""
-    if hasattr(driver, "_is_hidden") and driver._is_hidden:
+    if getattr(driver, "_is_hidden", None):
         raise Exception(
             "PyAutoGUI can't be used in headless mode!"
         )
@@ -868,17 +1061,15 @@ def __install_pyautogui_if_missing():
         import pyautogui
         with suppress(Exception):
             use_pyautogui_ver = constants.PyAutoGUI.VER
-            if pyautogui.__version__ != use_pyautogui_ver:
-                del pyautogui
-                shared_utils.pip_install(
-                    "pyautogui", version=use_pyautogui_ver
-                )
+            u_pv = shared_utils.make_version_tuple(use_pyautogui_ver)
+            pv = shared_utils.make_version_tuple(pyautogui.__version__)
+            if pv < u_pv:
+                del pyautogui  # To get newer ver
+                shared_utils.pip_install("pyautogui", version="Latest")
                 import pyautogui
     except Exception:
         print("\nPyAutoGUI required! Installing now...")
-        shared_utils.pip_install(
-            "pyautogui", version=constants.PyAutoGUI.VER
-        )
+        shared_utils.pip_install("pyautogui", version="Latest")
         try:
             import pyautogui
         except Exception:
@@ -895,11 +1086,9 @@ def __install_pyautogui_if_missing():
                 xvfb_width = 1366
                 xvfb_height = 768
                 if (
-                    hasattr(sb_config, "_xvfb_width")
-                    and sb_config._xvfb_width
+                    getattr(sb_config, "_xvfb_width", None)
                     and isinstance(sb_config._xvfb_width, int)
-                    and hasattr(sb_config, "_xvfb_height")
-                    and sb_config._xvfb_height
+                    and getattr(sb_config, "_xvfb_height", None)
                     and isinstance(sb_config._xvfb_height, int)
                 ):
                     xvfb_width = sb_config._xvfb_width
@@ -917,12 +1106,16 @@ def __install_pyautogui_if_missing():
                         backend="xvfb",
                         use_xauth=True,
                     )
+                    if "--debug-display" in sys.argv:
+                        print(
+                            "Starting VDisplay from browser_launcher: (%s, %s)"
+                            % (xvfb_width, xvfb_height)
+                        )
                     _xvfb_display.start()
                     sb_config._virtual_display = _xvfb_display
                     sb_config.headless_active = True
                     if (
-                        hasattr(sb_config, "reuse_session")
-                        and sb_config.reuse_session
+                        getattr(sb_config, "reuse_session", None)
                         and hasattr(sb_config, "_vd_list")
                         and isinstance(sb_config._vd_list, list)
                     ):
@@ -954,8 +1147,7 @@ def get_configured_pyautogui(pyautogui_copy):
         and "DISPLAY" in os.environ.keys()
     ):
         if (
-            hasattr(sb_config, "_pyautogui_x11_display")
-            and sb_config._pyautogui_x11_display
+            getattr(sb_config, "_pyautogui_x11_display", None)
             and hasattr(pyautogui_copy._pyautogui_x11, "_display")
             and (
                 sb_config._pyautogui_x11_display
@@ -978,9 +1170,7 @@ def uc_gui_press_key(driver, key):
     install_pyautogui_if_missing(driver)
     import pyautogui
     pyautogui = get_configured_pyautogui(pyautogui)
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:
         pyautogui.press(key)
 
@@ -989,9 +1179,7 @@ def uc_gui_press_keys(driver, keys):
     install_pyautogui_if_missing(driver)
     import pyautogui
     pyautogui = get_configured_pyautogui(pyautogui)
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:
         for key in keys:
             pyautogui.press(key)
@@ -1001,9 +1189,7 @@ def uc_gui_write(driver, text):
     install_pyautogui_if_missing(driver)
     import pyautogui
     pyautogui = get_configured_pyautogui(pyautogui)
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:
         pyautogui.write(text)
 
@@ -1036,9 +1222,7 @@ def _uc_gui_click_x_y(driver, x, y, timeframe=0.25, uc_lock=False):
             % (x, y, screen_width, screen_height)
         )
     if uc_lock:
-        gui_lock = fasteners.InterProcessLock(
-            constants.MultiBrowser.PYAUTOGUILOCK
-        )
+        gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
         with gui_lock:  # Prevent issues with multiple processes
             pyautogui.moveTo(x, y, timeframe, pyautogui.easeOutQuad)
             if timeframe >= 0.25:
@@ -1057,9 +1241,7 @@ def _uc_gui_click_x_y(driver, x, y, timeframe=0.25, uc_lock=False):
 
 
 def uc_gui_click_x_y(driver, x, y, timeframe=0.25):
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:  # Prevent issues with multiple processes
         install_pyautogui_if_missing(driver)
         import pyautogui
@@ -1070,10 +1252,7 @@ def uc_gui_click_x_y(driver, x, y, timeframe=0.25):
             connected = driver.is_connected()
             if (
                 not connected
-                and (
-                    not hasattr(sb_config, "_saved_width_ratio")
-                    or not sb_config._saved_width_ratio
-                )
+                and not getattr(sb_config, "_saved_width_ratio", None)
                 and not __is_cdp_swap_needed(driver)
             ):
                 driver.reconnect(0.1)
@@ -1108,8 +1287,8 @@ def uc_gui_click_x_y(driver, x, y, timeframe=0.25):
             driver.cdp.minimize()
             driver.cdp.set_window_rect(win_x, win_y, width, height)
         if IS_WINDOWS:
-            x = x * width_ratio
-            y = y * width_ratio
+            x = x * (width_ratio + 0.03)
+            y = y * (width_ratio - 0.03)
             _uc_gui_click_x_y(driver, x, y, timeframe=timeframe, uc_lock=False)
             return
         with suppress(Exception):
@@ -1122,9 +1301,14 @@ def uc_gui_click_x_y(driver, x, y, timeframe=0.25):
 def _on_a_cf_turnstile_page(driver):
     source = driver.get_page_source()
     if (
-        'data-callback="onCaptchaSuccess"' in source
-        or "/challenge-platform/scripts/" in source
+        (
+            'data-callback="onCaptchaSuccess"' in source
+            and 'title="reCAPTCHA"' not in source
+            and 'id="recaptcha-token"' not in source
+        )
+        or "/challenge-platform/h/b/" in source
         or 'id="challenge-widget-' in source
+        or "challenges.cloudf" in source
         or "cf-turnstile-" in source
     ):
         return True
@@ -1149,15 +1333,17 @@ def _uc_gui_click_captcha(
     ctype=None,
 ):
     cdp_mode_on_at_start = __is_cdp_swap_needed(driver)
+    if cdp_mode_on_at_start:
+        return driver.cdp.gui_click_captcha()
     _on_a_captcha_page = None
     if ctype == "cf_t":
         if not _on_a_cf_turnstile_page(driver):
-            return
+            return False
         else:
             _on_a_captcha_page = _on_a_cf_turnstile_page
     elif ctype == "g_rc":
         if not _on_a_g_recaptcha_page(driver):
-            return
+            return False
         else:
             _on_a_captcha_page = _on_a_g_recaptcha_page
     else:
@@ -1168,7 +1354,7 @@ def _uc_gui_click_captcha(
             ctype = "cf_t"
             _on_a_captcha_page = _on_a_cf_turnstile_page
         else:
-            return
+            return False
     install_pyautogui_if_missing(driver)
     import pyautogui
     pyautogui = get_configured_pyautogui(pyautogui)
@@ -1177,9 +1363,7 @@ def _uc_gui_click_captcha(
     x = None
     y = None
     visible_iframe = True
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:  # Prevent issues with multiple processes
         needs_switch = False
         width_ratio = 1.0
@@ -1251,39 +1435,39 @@ def _uc_gui_click_captcha(
                     and driver.is_element_present("%s div" % frame)
                 ):
                     frame = "%s div" % frame
-                elif (
-                    driver.is_element_present('[name*="cf-turnstile-"]')
-                    and driver.is_element_present("#challenge-form div > div")
-                ):
+                elif driver.is_element_present("#challenge-form div > div"):
                     frame = "#challenge-form div > div"
                 elif (
-                    driver.is_element_present('[name*="cf-turnstile-"]')
-                    and driver.is_element_present(
+                    driver.is_element_present(
                         '[style="display: grid;"] div div'
                     )
                 ):
                     frame = '[style="display: grid;"] div div'
                 elif (
                     driver.is_element_present('[name*="cf-turnstile-"]')
-                    and driver.is_element_present("[class*=spacer] + div div")
-                ):
-                    frame = '[class*=spacer] + div div'
-                elif (
-                    driver.is_element_present('[name*="cf-turnstile-"]')
-                    and driver.is_element_present("div.spacer div")
-                ):
-                    frame = "div.spacer div"
-                elif (
-                    driver.is_element_present('script[src*="challenges.c"]')
                     and driver.is_element_present(
+                        ".spacer + div div:not([class])"
+                    )
+                ):
+                    frame = '.spacer + div div:not([class])'
+                elif (
+                    driver.is_element_present(".spacer div:not([class])")
+                ):
+                    frame = ".spacer div:not([class])"
+                elif (
+                    driver.is_element_present(
                         '[data-testid*="challenge-"] div'
                     )
                 ):
                     frame = '[data-testid*="challenge-"] div'
                 elif driver.is_element_present(
-                    "form.turnstile div#turnstile-widget div:not([class])"
+                    "div#turnstile-widget div:not([class])"
                 ):
-                    frame = "form.turnstile #turnstile-widget div:not([class])"
+                    frame = "div#turnstile-widget div:not([class])"
+                elif driver.is_element_present(
+                    "ngx-turnstile div:not([class])"
+                ):
+                    frame = "ngx-turnstile div:not([class])"
                 elif driver.is_element_present(
                     'form div:not([class]):has(input[name*="cf-turn"])'
                 ):
@@ -1302,12 +1486,30 @@ def _uc_gui_click_captcha(
                     frame = "body > div#check > div:not([class])"
                 elif driver.is_element_present(".cf-turnstile-wrapper"):
                     frame = ".cf-turnstile-wrapper"
+                elif driver.is_element_present('[class="cf-turnstile"]'):
+                    frame = '[class="cf-turnstile"]'
+                elif driver.is_element_present(
+                    '[id*="turnstile"] div:not([class])'
+                ):
+                    frame = '[id*="turnstile"] div:not([class])'
+                elif driver.is_element_present(
+                    '[class*="turnstile"] div:not([class])'
+                ):
+                    frame = '[class*="turnstile"] div:not([class])'
                 elif driver.is_element_present(
                     '[data-callback="onCaptchaSuccess"]'
                 ):
                     frame = '[data-callback="onCaptchaSuccess"]'
+                elif driver.is_element_present(
+                    "div:not([class]):not([id]):not([aria-label]) > "
+                    "div:not([class]):not([id]):not([aria-label])"
+                ):
+                    frame = (
+                        "div:not([class]):not([id]):not([aria-label]) > "
+                        "div:not([class]):not([id]):not([aria-label])"
+                    )
                 else:
-                    return
+                    return False
             if (
                 driver.is_element_present("form")
                 and (
@@ -1353,9 +1555,11 @@ def _uc_gui_click_captcha(
                 else:
                     driver.execute_script(script)
             elif (
-                driver.is_element_present("form")
-                and driver.is_element_present(
-                    'form [id*="turnstile"] > div:not([class])'
+                driver.is_element_present(
+                    'form [id*="turnstile"] div:not([class])'
+                )
+                or driver.is_element_present(
+                    'form [class*="turnstile"] div:not([class])'
                 )
             ):
                 script = (
@@ -1363,7 +1567,30 @@ def _uc_gui_click_captcha(
                     'form [id*="turnstile"]');
                     var index = 0, length = $elements.length;
                     for(; index < length; index++){
+                    $elements[index].setAttribute('align', 'left');}
+                    var $elements = document.querySelectorAll(
+                    'form [class*="turnstile"]');
+                    var index = 0, length = $elements.length;
+                    for(; index < length; index++){
                     $elements[index].setAttribute('align', 'left');}"""
+                )
+                if __is_cdp_swap_needed(driver):
+                    driver.cdp.evaluate(script)
+                else:
+                    driver.execute_script(script)
+            elif (
+                driver.is_element_present(
+                    '[style*="text-align: center;"] div:not([class])'
+                )
+            ):
+                script = (
+                    """var $elements = document.querySelectorAll(
+                    '[style*="text-align: center;"]');
+                    var index = 0, length = $elements.length;
+                    for(; index < length; index++){
+                    the_style = $elements[index].getAttribute('style');
+                    new_style = the_style.replaceAll('center', 'left');
+                    $elements[index].setAttribute('style', new_style);}"""
                 )
                 if __is_cdp_swap_needed(driver):
                     driver.cdp.evaluate(script)
@@ -1382,9 +1609,9 @@ def _uc_gui_click_captcha(
                         if driver.is_connected():
                             driver.switch_to_frame("iframe")
                     else:
-                        return
+                        return False
             if not i_x or not i_y:
-                return
+                return False
         try:
             if ctype == "g_rc" and not driver.is_connected():
                 x = (i_x + 29) * width_ratio
@@ -1403,8 +1630,11 @@ def _uc_gui_click_captcha(
                 y = i_y + element.rect["y"] + (element.rect["height"] / 2.0)
                 y += 0.5
             else:
-                x = (i_x + 32) * width_ratio
-                y = (i_y + 32) * width_ratio
+                x = (i_x + 28) * width_ratio
+                if not IS_WINDOWS:
+                    y = (i_y + 32) * width_ratio
+                else:
+                    y = (i_y + 22) * width_ratio
             if driver.is_connected():
                 driver.switch_to.default_content()
         except Exception:
@@ -1412,7 +1642,7 @@ def _uc_gui_click_captcha(
                 try:
                     driver.switch_to.default_content()
                 except Exception:
-                    return
+                    return False
         if x and y:
             sb_config._saved_cf_x_y = (x, y)
             if not __is_cdp_swap_needed(driver):
@@ -1426,7 +1656,7 @@ def _uc_gui_click_captcha(
                 _uc_gui_click_x_y(driver, x, y, timeframe=0.32)
                 if __is_cdp_swap_needed(driver):
                     time.sleep(float(constants.UC.RECONNECT_TIME) / 2.0)
-                    return
+                    return True
     reconnect_time = (float(constants.UC.RECONNECT_TIME) / 2.0) + 0.6
     if IS_LINUX:
         reconnect_time = constants.UC.RECONNECT_TIME + 0.2
@@ -1458,17 +1688,17 @@ def _uc_gui_click_captcha(
                     try:
                         driver.switch_to_frame("iframe")
                     except Exception:
-                        return
+                        return False
                 checkbox_success = None
                 if ctype == "cf_t":
                     checkbox_success = "#success-icon"
                 elif ctype == "g_rc":
                     checkbox_success = "span.recaptcha-checkbox-checked"
                 else:
-                    return  # If this line is reached, ctype wasn't set
+                    return False  # If line is reached, ctype wasn't set
                 if driver.is_element_visible("#success-icon"):
                     driver.switch_to.parent_frame(checkbox_success)
-                    return
+                    return True
             if blind:
                 driver.uc_open_with_disconnect(driver.get_current_url(), 3.8)
                 if __is_cdp_swap_needed(driver) and _on_a_captcha_page(driver):
@@ -1482,6 +1712,7 @@ def _uc_gui_click_captcha(
                     _uc_gui_click_x_y(driver, x, y, timeframe=0.32)
         if not cdp_mode_on_at_start:
             driver.reconnect(reconnect_time)
+    return True
 
 
 def uc_gui_click_captcha(driver, frame="iframe", retry=False, blind=False):
@@ -1535,9 +1766,7 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
     import pyautogui
     pyautogui = get_configured_pyautogui(pyautogui)
     visible_iframe = True
-    gui_lock = fasteners.InterProcessLock(
-        constants.MultiBrowser.PYAUTOGUILOCK
-    )
+    gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
     with gui_lock:  # Prevent issues with multiple processes
         needs_switch = False
         if not __is_cdp_swap_needed(driver):
@@ -1569,7 +1798,6 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                 driver.set_window_rect(win_x, win_y, width, height)
                 time.sleep(0.33)
         tab_up_first = False
-        special_form = False
         if ctype == "cf_t":
             if (
                 driver.is_element_present(".cf-turnstile-wrapper iframe")
@@ -1588,9 +1816,9 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                     frame = '[data-callback="onCaptchaSuccess"]'
                 elif (
                     driver.is_element_present('[name*="cf-turnstile-"]')
-                    and driver.is_element_present("div.spacer div")
+                    and driver.is_element_present(".spacer div:not([class])")
                 ):
-                    frame = "div.spacer div"
+                    frame = ".spacer div:not([class])"
                 elif (
                     driver.is_element_present('script[src*="challenges.c"]')
                     and driver.is_element_present(
@@ -1603,7 +1831,6 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                 ):
                     frame = 'form div:not([class]):has(input[name*="cf-turn"])'
                     tab_up_first = True
-                    special_form = True
                 elif (
                     driver.is_element_present('[src*="/turnstile/"]')
                     and driver.is_element_present("form div:not(:has(*))")
@@ -1617,6 +1844,18 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                     )
                 ):
                     frame = "body > div#check > div:not([class])"
+                elif driver.is_element_present(
+                    "div#turnstile-widget div:not([class])"
+                ):
+                    frame = "div#turnstile-widget div:not([class])"
+                elif driver.is_element_present(".cf-turnstile-wrapper"):
+                    frame = ".cf-turnstile-wrapper"
+                elif driver.is_element_present('[class="cf-turnstile"]'):
+                    frame = '[class="cf-turnstile"]'
+                elif driver.is_element_present(
+                    "div:not([class]) > div:not([class])"
+                ):
+                    frame = "div:not([class]) > div:not([class])"
                 else:
                     return
         else:
@@ -1657,8 +1896,7 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                 active_element_css = js_utils.get_active_element_css(driver)
                 if (
                     active_element_css.startswith(selector)
-                    or active_element_css.endswith(" > div" * 2)
-                    or (special_form and active_element_css.endswith(" div"))
+                    or active_element_css.endswith(" div")
                     or (ctype == "g_rc" and "frame[name" in active_element_css)
                 ):
                     found_checkbox = True
@@ -1677,8 +1915,7 @@ def _uc_gui_handle_captcha_(driver, frame="iframe", ctype=None):
                 driver.is_element_present(".footer .clearfix .ray-id")
                 or driver.is_element_present("script[data-cf-beacon]")
             )
-            and hasattr(sb_config, "_saved_cf_tab_count")
-            and sb_config._saved_cf_tab_count
+            and getattr(sb_config, "_saved_cf_tab_count", None)
             and not __is_cdp_swap_needed(driver)
         ):
             driver.uc_open_with_disconnect(driver.current_url, 3.8)
@@ -1794,6 +2031,15 @@ def get_valid_binary_names_for_browser(browser):
         raise Exception("Invalid combination for OS browser binaries!")
 
 
+def _special_binary_exists(location, name):
+    filename = str(location).split("/")[-1].split("\\")[-1]
+    return (
+        location
+        and str(name).lower() in filename.lower()
+        and os.path.exists(location)
+    )
+
+
 def _repair_chromedriver(chrome_options, headless_options, mcv=None):
     if mcv:
         subprocess.check_call(
@@ -1848,14 +2094,12 @@ def _repair_edgedriver(edge_version):
 
 
 def _mark_driver_repaired():
-    import codecs
-
     abs_path = os.path.abspath(".")
     driver_repaired_lock = constants.MultiBrowser.DRIVER_REPAIRED
     file_path = os.path.join(abs_path, driver_repaired_lock)
     if not os.path.exists(DOWNLOADS_FOLDER):
         os.makedirs(DOWNLOADS_FOLDER)
-    out_file = codecs.open(file_path, "w+", encoding="utf-8")
+    out_file = open(file_path, mode="w+", encoding="utf-8")
     out_file.writelines("")
     out_file.close()
 
@@ -1889,6 +2133,7 @@ def _add_chrome_proxy_extension(
     proxy_string,
     proxy_user,
     proxy_pass,
+    proxy_scheme,
     proxy_bypass_list=None,
     zip_it=True,
     multi_proxy=False,
@@ -1896,6 +2141,7 @@ def _add_chrome_proxy_extension(
     """Implementation of https://stackoverflow.com/a/35293284/7058266
     for https://stackoverflow.com/q/12848327/7058266
     (Run Selenium on a proxy server that requires authentication.)"""
+    zip_it = False
     args = " ".join(sys.argv)
     bypass_list = proxy_bypass_list
     if (
@@ -1907,7 +2153,11 @@ def _add_chrome_proxy_extension(
             proxy_zip_lock = fasteners.InterProcessLock(PROXY_ZIP_LOCK)
             with proxy_zip_lock:
                 proxy_helper.create_proxy_ext(
-                    proxy_string, proxy_user, proxy_pass, bypass_list
+                    proxy_string,
+                    proxy_user,
+                    proxy_pass,
+                    proxy_scheme,
+                    bypass_list,
                 )
                 proxy_zip = proxy_helper.PROXY_ZIP_PATH
                 chrome_options.add_extension(proxy_zip)
@@ -1918,6 +2168,7 @@ def _add_chrome_proxy_extension(
                     proxy_string,
                     proxy_user,
                     proxy_pass,
+                    proxy_scheme,
                     bypass_list,
                     zip_it=False,
                 )
@@ -1936,7 +2187,11 @@ def _add_chrome_proxy_extension(
                     _set_proxy_filenames()
                 if not os.path.exists(proxy_helper.PROXY_ZIP_PATH):
                     proxy_helper.create_proxy_ext(
-                        proxy_string, proxy_user, proxy_pass, bypass_list
+                        proxy_string,
+                        proxy_user,
+                        proxy_pass,
+                        proxy_scheme,
+                        bypass_list,
                     )
                 proxy_zip = proxy_helper.PROXY_ZIP_PATH
                 chrome_options.add_extension(proxy_zip)
@@ -1952,6 +2207,7 @@ def _add_chrome_proxy_extension(
                         proxy_string,
                         proxy_user,
                         proxy_pass,
+                        proxy_scheme,
                         bypass_list,
                         zip_it=False,
                     )
@@ -2026,6 +2282,7 @@ def _set_chrome_options(
     proxy_auth,
     proxy_user,
     proxy_pass,
+    proxy_scheme,
     proxy_bypass_list,
     proxy_pac_url,
     multi_proxy,
@@ -2084,6 +2341,7 @@ def _set_chrome_options(
     prefs["download.prompt_for_download"] = False
     prefs["download_bubble.partial_view_enabled"] = False
     prefs["credentials_enable_service"] = False
+    prefs["autofill.credit_card_enabled"] = False
     prefs["local_discovery.notifications_enabled"] = False
     prefs["safebrowsing.enabled"] = False  # Prevent PW "data breach" pop-ups
     prefs["safebrowsing.disable_download_protection"] = True
@@ -2109,6 +2367,9 @@ def _set_chrome_options(
     prefs["profile.default_content_setting_values.automatic_downloads"] = 1
     if locale_code:
         prefs["intl.accept_languages"] = locale_code
+        sb_config._cdp_locale = locale_code
+    else:
+        sb_config._cdp_locale = None
     if block_images:
         prefs["profile.managed_default_content_settings.images"] = 2
     if disable_cookies:
@@ -2119,6 +2380,15 @@ def _set_chrome_options(
         prefs["enable_do_not_track"] = True
     if external_pdf:
         prefs["plugins.always_open_pdf_externally"] = True
+        pdf_settings = {
+            "recentDestinations": [
+                {"id": "Save as PDF", "origin": "local", "account": ""}
+            ],
+            "selectedDestinationId": "Save as PDF",
+            "version": 2,
+        }
+        app_state = "printing.print_preview_sticky_settings.appState"
+        prefs[app_state] = json.dumps(pdf_settings)
     if proxy_string or proxy_pac_url:
         # Implementation of https://stackoverflow.com/q/65705775/7058266
         prefs["webrtc.ip_handling_policy"] = "disable_non_proxied_udp"
@@ -2215,6 +2485,19 @@ def _set_chrome_options(
         and not recorder_ext
         and (not extension_zip and not extension_dir)
     ):
+        if (
+            binary_location
+            and isinstance(binary_location, str)
+            and (
+                binary_location.lower().endswith("comet")
+                or binary_location.lower().endswith("comet.exe")
+                or binary_location.lower().endswith("atlas")
+                or binary_location.lower().endswith("atlas.exe")
+            )
+        ):
+            # AI browsers don't like Incognito / Guest Mode
+            incognito = False
+            guest_mode = False
         if incognito:
             # Use Chrome's Incognito Mode
             # Incognito Mode prevents Chrome extensions from loading,
@@ -2238,14 +2521,28 @@ def _set_chrome_options(
         # Can be a comma-separated list of .ZIP or .CRX files
         extension_zip_list = extension_zip.split(",")
         for extension_zip_item in extension_zip_list:
-            abs_path = os.path.abspath(extension_zip_item)
-            chrome_options.add_extension(abs_path)
+            abs_path = os.path.realpath(extension_zip_item)
+            if os.path.exists(abs_path):
+                try:
+                    abs_path_dir = os.path.join(
+                        DOWNLOADS_FOLDER, abs_path.split(".")[0]
+                    )
+                    _unzip_to_new_folder(abs_path, abs_path_dir)
+                    chrome_options = add_chrome_ext_dir(
+                        chrome_options, abs_path_dir
+                    )
+                    sb_config._ext_dirs.append(abs_path_dir)
+                except Exception:
+                    with suppress(Exception):
+                        chrome_options.add_extension(abs_path)
     if extension_dir:
         # load-extension input can be a comma-separated list
         abs_path = (
-            ",".join(os.path.abspath(p) for p in extension_dir.split(","))
+            ",".join(os.path.realpath(p) for p in extension_dir.split(","))
         )
         chrome_options = add_chrome_ext_dir(chrome_options, abs_path)
+        for p in extension_dir.split(","):
+            sb_config._ext_dirs.append(os.path.realpath(p))
     if (
         page_load_strategy
         and page_load_strategy.lower() in ["eager", "none"]
@@ -2254,8 +2551,7 @@ def _set_chrome_options(
         chrome_options.page_load_strategy = page_load_strategy.lower()
     elif (
         not page_load_strategy
-        and hasattr(settings, "PAGE_LOAD_STRATEGY")
-        and settings.PAGE_LOAD_STRATEGY
+        and getattr(settings, "PAGE_LOAD_STRATEGY", None)
         and settings.PAGE_LOAD_STRATEGY.lower() in ["eager", "none"]
     ):
         # Only change it if not "normal", which is the default.
@@ -2280,37 +2576,32 @@ def _set_chrome_options(
     if (settings.DISABLE_CSP_ON_CHROME or disable_csp) and not headless:
         # Headless Chrome does not support extensions, which are required
         # for disabling the Content Security Policy on Chrome.
-        if is_using_uc(undetectable, browser_name):
-            disable_csp_zip = DISABLE_CSP_ZIP_PATH
-            disable_csp_dir = os.path.join(DOWNLOADS_FOLDER, "disable_csp")
-            _unzip_to_new_folder(disable_csp_zip, disable_csp_dir)
-            chrome_options = add_chrome_ext_dir(
-                chrome_options, disable_csp_dir
-            )
-        else:
-            chrome_options = _add_chrome_disable_csp_extension(chrome_options)
+        disable_csp_zip = DISABLE_CSP_ZIP_PATH
+        disable_csp_dir = os.path.join(DOWNLOADS_FOLDER, "disable_csp")
+        _unzip_to_new_folder(disable_csp_zip, disable_csp_dir)
+        chrome_options = add_chrome_ext_dir(
+            chrome_options, disable_csp_dir
+        )
+        sb_config._ext_dirs.append(disable_csp_dir)
     if ad_block_on and not headless:
         # Headless Chrome does not support extensions.
-        if is_using_uc(undetectable, browser_name):
-            ad_block_zip = AD_BLOCK_ZIP_PATH
-            ad_block_dir = os.path.join(DOWNLOADS_FOLDER, "ad_block")
-            _unzip_to_new_folder(ad_block_zip, ad_block_dir)
-            chrome_options = add_chrome_ext_dir(chrome_options, ad_block_dir)
-        else:
-            chrome_options = _add_chrome_ad_block_extension(chrome_options)
+        ad_block_zip = AD_BLOCK_ZIP_PATH
+        ad_block_dir = os.path.join(DOWNLOADS_FOLDER, "ad_block")
+        _unzip_to_new_folder(ad_block_zip, ad_block_dir)
+        chrome_options = add_chrome_ext_dir(chrome_options, ad_block_dir)
+        sb_config._ext_dirs.append(ad_block_dir)
     if recorder_ext and not headless:
-        if is_using_uc(undetectable, browser_name):
-            recorder_zip = RECORDER_ZIP_PATH
-            recorder_dir = os.path.join(DOWNLOADS_FOLDER, "recorder")
-            _unzip_to_new_folder(recorder_zip, recorder_dir)
-            chrome_options = add_chrome_ext_dir(chrome_options, recorder_dir)
-        else:
-            chrome_options = _add_chrome_recorder_extension(chrome_options)
+        recorder_zip = RECORDER_ZIP_PATH
+        recorder_dir = os.path.join(DOWNLOADS_FOLDER, "recorder")
+        _unzip_to_new_folder(recorder_zip, recorder_dir)
+        chrome_options = add_chrome_ext_dir(chrome_options, recorder_dir)
+        sb_config._ext_dirs.append(recorder_dir)
     if chromium_arg and "sbase" in chromium_arg:
         sbase_ext_zip = SBASE_EXT_ZIP_PATH
         sbase_ext_dir = os.path.join(DOWNLOADS_FOLDER, "sbase_ext")
         _unzip_to_new_folder(sbase_ext_zip, sbase_ext_dir)
         chrome_options = add_chrome_ext_dir(chrome_options, sbase_ext_dir)
+        sb_config._ext_dirs.append(sbase_ext_dir)
     if proxy_string:
         if proxy_auth:
             zip_it = True
@@ -2321,6 +2612,7 @@ def _set_chrome_options(
                 proxy_string,
                 proxy_user,
                 proxy_pass,
+                proxy_scheme,
                 proxy_bypass_list,
                 zip_it,
                 multi_proxy,
@@ -2340,6 +2632,7 @@ def _set_chrome_options(
                 None,
                 proxy_user,
                 proxy_pass,
+                proxy_scheme,
                 proxy_bypass_list,
                 zip_it,
                 multi_proxy,
@@ -2391,15 +2684,20 @@ def _set_chrome_options(
         if is_using_uc(undetectable, browser_name):
             chrome_options.add_argument("--disable-application-cache")
             chrome_options.add_argument("--disable-setuid-sandbox")
-            if not binary_location:
+        if not binary_location:
+            if os.path.exists("/bin/google-chrome"):
+                binary_location = "/bin/google-chrome"
+            elif os.path.exists("/usr/bin/google-chrome-stable"):
+                binary_location = "/usr/bin/google-chrome-stable"
+            elif os.path.exists("/usr/bin/google-chrome"):
+                binary_location = "/usr/bin/google-chrome"
+            elif os.path.exists("/usr/bin/google-chrome-stable"):
+                binary_location = "/usr/bin/google-chrome-stable"
+            else:
                 br_app = "google-chrome"
                 binary_loc = detect_b_ver.get_binary_location(br_app, True)
                 if os.path.exists(binary_loc):
                     binary_location = binary_loc
-                elif os.path.exists("/usr/bin/google-chrome-stable"):
-                    binary_location = "/usr/bin/google-chrome-stable"
-                elif os.path.exists("/usr/bin/google-chrome"):
-                    binary_location = "/usr/bin/google-chrome"
     extra_disabled_features = []
     if chromium_arg:
         # Can be a comma-separated list of Chromium args or a list
@@ -2456,6 +2754,7 @@ def _set_chrome_options(
         chrome_options.add_argument("--disable-renderer-backgrounding")
     chrome_options.add_argument("--disable-backgrounding-occluded-windows")
     chrome_options.add_argument("--disable-client-side-phishing-detection")
+    chrome_options.add_argument("--disable-device-discovery-notifications")
     chrome_options.add_argument("--disable-oopr-debug-crash-dump")
     chrome_options.add_argument("--disable-top-sites")
     chrome_options.add_argument("--ash-no-nudges")
@@ -2472,6 +2771,7 @@ def _set_chrome_options(
     included_disabled_features.append("OptimizationHints")
     included_disabled_features.append("OptimizationHintsFetching")
     included_disabled_features.append("Translate")
+    included_disabled_features.append("ComponentUpdater")
     included_disabled_features.append("OptimizationTargetPrediction")
     included_disabled_features.append("OptimizationGuideModelDownloading")
     included_disabled_features.append("DownloadBubble")
@@ -2481,11 +2781,25 @@ def _set_chrome_options(
     included_disabled_features.append("PrivacySandboxSettings4")
     included_disabled_features.append("SidePanelPinning")
     included_disabled_features.append("UserAgentClientHint")
+    included_disabled_features.append("DisableLoadExtensionCommandLineSwitch")
+    included_disabled_features.append("Bluetooth")
+    included_disabled_features.append("WebBluetooth")
+    included_disabled_features.append("UnifiedWebBluetooth")
+    included_disabled_features.append("WebAuthentication")
+    included_disabled_features.append("PasskeyAuth")
     for item in extra_disabled_features:
         if item not in included_disabled_features:
             included_disabled_features.append(item)
     d_f_string = ",".join(included_disabled_features)
     chrome_options.add_argument("--disable-features=%s" % d_f_string)
+    chrome_options.add_argument("--enable-unsafe-extension-debugging")
+    if proxy_string:
+        chrome_options.add_argument("--test-type")
+    if proxy_auth or sb_config._ext_dirs:
+        if not is_using_uc(undetectable, browser_name):
+            chrome_options.add_argument("--remote-debugging-pipe")
+            chrome_options.enable_webextensions = True
+            chrome_options.enable_bidi = True
     if (
         is_using_uc(undetectable, browser_name)
         and (
@@ -2503,7 +2817,8 @@ def _set_chrome_options(
         chrome_options.add_argument("--disable-popup-blocking")
         # Skip remaining options that trigger anti-bot services
         return chrome_options
-    chrome_options.add_argument("--test-type")
+    if not proxy_string:
+        chrome_options.add_argument("--test-type")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("--no-first-run")
     chrome_options.add_argument("--allow-insecure-localhost")
@@ -2749,15 +3064,62 @@ def get_driver(
     device_pixel_ratio=None,
     browser=None,  # A duplicate of browser_name to avoid confusion
 ):
+    sb_config._ext_dirs = []
+    driver_dir = DRIVER_DIR
+    if binary_location == "_chromium_":
+        driver_dir = DRIVER_DIR_CHROMIUM
+    elif binary_location == "cft":
+        driver_dir = DRIVER_DIR_CFT
+    elif binary_location == "chs":
+        driver_dir = DRIVER_DIR_CHS
+    elif _special_binary_exists(binary_location, "opera"):
+        driver_dir = DRIVER_DIR_OPERA
+        sb_config._cdp_browser = "opera"
+    elif _special_binary_exists(binary_location, "brave"):
+        driver_dir = DRIVER_DIR_BRAVE
+        sb_config._cdp_browser = "brave"
+    elif _special_binary_exists(binary_location, "comet"):
+        driver_dir = DRIVER_DIR_COMET
+        sb_config._cdp_browser = "comet"
+    elif _special_binary_exists(binary_location, "atlas"):
+        driver_dir = DRIVER_DIR_ATLAS
+        sb_config._cdp_browser = "atlas"
+    if (
+        hasattr(sb_config, "settings")
+        and getattr(sb_config.settings, "NEW_DRIVER_DIR", None)
+        and os.path.exists(sb_config.settings.NEW_DRIVER_DIR)
+    ):
+        driver_dir = sb_config.settings.NEW_DRIVER_DIR
     if not browser_name:
         if browser:
             browser_name = browser
         else:
             browser_name = "chrome"  # The default if not specified
+    if browser_name in constants.ChromiumSubs.chromium_subs:
+        browser_name = "chrome"
     browser_name = browser_name.lower()
+    if is_using_uc(undetectable, browser_name):
+        if ad_block_on:
+            sb_config.ad_block_on = True
+        else:
+            sb_config.ad_block_on = False
+        if disable_csp:
+            sb_config.disable_csp = True
+        else:
+            sb_config.disable_csp = False
+        if mobile_emulator:
+            # For stealthy mobile mode, see the CDP Mode examples
+            # to learn how to properly configure it.
+            user_agent = None  # Undo the override
+            mobile_emulator = False  # Instead, set from CDP Mode
+            sb_config._cdp_mobile_mode = True
+        else:
+            sb_config._cdp_mobile_mode = False
     if headless2 and browser_name == constants.Browser.FIREFOX:
         headless2 = False  # Only for Chromium
         headless = True
+    if binary_location and isinstance(binary_location, str):
+        binary_location = binary_location.strip()
     if (
         is_using_uc(undetectable, browser_name)
         and binary_location
@@ -2773,6 +3135,51 @@ def get_driver(
             or browser_name == constants.Browser.EDGE
         )
     ):
+        if (
+            binary_location.lower() == "_chromium_"
+            and browser_name == constants.Browser.GOOGLE_CHROME
+        ):
+            binary_folder = None
+            if IS_MAC:
+                binary_folder = "chrome-mac"
+            elif IS_LINUX:
+                binary_folder = "chrome-linux"
+            elif IS_WINDOWS:
+                binary_folder = "chrome-win"
+            if binary_folder:
+                binary_location = os.path.join(driver_dir, binary_folder)
+                if not os.path.exists(binary_location):
+                    from seleniumbase.console_scripts import sb_install
+                    args = " ".join(sys.argv)
+                    if not (
+                        "-n" in sys.argv or " -n=" in args or args == "-c"
+                    ):
+                        # (Not multithreaded)
+                        sys_args = sys.argv  # Save a copy of current sys args
+                        log_d("\nWarning: Chromium binary not found...")
+                        try:
+                            sb_install.main(override="chromium")
+                        except Exception as e:
+                            log_d("\nWarning: Chrome download failed: %s" % e)
+                        sys.argv = sys_args  # Put back the original sys args
+                    else:
+                        chrome_fixing_lock = fasteners.InterProcessLock(
+                            constants.MultiBrowser.DRIVER_FIXING_LOCK
+                        )
+                        with chrome_fixing_lock:
+                            with suppress(Exception):
+                                shared_utils.make_writable(
+                                    constants.MultiBrowser.DRIVER_FIXING_LOCK
+                                )
+                            if not os.path.exists(binary_location):
+                                sys_args = sys.argv  # Save a copy of sys args
+                                log_d(
+                                    "\nWarning: Chromium binary not found..."
+                                )
+                                sb_install.main(override="chromium")
+                                sys.argv = sys_args  # Put back original args
+            else:
+                binary_location = None
         if (
             binary_location.lower() == "cft"
             and browser_name == constants.Browser.GOOGLE_CHROME
@@ -2791,7 +3198,7 @@ def get_driver(
                 else:
                     binary_folder = "chrome-win32"
             if binary_folder:
-                binary_location = os.path.join(DRIVER_DIR, binary_folder)
+                binary_location = os.path.join(driver_dir, binary_folder)
                 if not os.path.exists(binary_location):
                     from seleniumbase.console_scripts import sb_install
                     args = " ".join(sys.argv)
@@ -2845,7 +3252,7 @@ def get_driver(
                 else:
                     binary_folder = "chrome-headless-shell-win32"
             if binary_folder:
-                binary_location = os.path.join(DRIVER_DIR, binary_folder)
+                binary_location = os.path.join(driver_dir, binary_folder)
                 if not os.path.exists(binary_location):
                     from seleniumbase.console_scripts import sb_install
                     args = " ".join(sys.argv)
@@ -2910,10 +3317,23 @@ def get_driver(
                 binary_name = "Google Chrome for Testing"
                 binary_location += "/Google Chrome for Testing.app"
                 binary_location += "/Contents/MacOS/Google Chrome for Testing"
+            elif binary_name == "Chromium.app":
+                binary_name = "Chromium"
+                binary_location += "/Contents/MacOS/Chromium"
+            elif binary_name in ["chrome-mac"]:
+                binary_name = "Chromium"
+                binary_location += "/Chromium.app"
+                binary_location += "/Contents/MacOS/Chromium"
             elif binary_name == "chrome-linux64":
                 binary_name = "chrome"
                 binary_location += "/chrome"
+            elif binary_name == "chrome-linux":
+                binary_name = "chrome"
+                binary_location += "/chrome"
             elif binary_name in ["chrome-win32", "chrome-win64"]:
+                binary_name = "chrome.exe"
+                binary_location += "\\chrome.exe"
+            elif binary_name in ["chrome-win"]:
                 binary_name = "chrome.exe"
                 binary_location += "\\chrome.exe"
             elif binary_name in [
@@ -2951,7 +3371,10 @@ def get_driver(
     proxy_auth = False
     proxy_user = None
     proxy_pass = None
+    proxy_scheme = "http"
     if proxy_string:
+        # (The line below is for the Chrome 142 proxy auth fix)
+        sb_config._cdp_proxy = proxy_string
         username_and_password = None
         if "@" in proxy_string:
             # Format => username:password@hostname:port
@@ -2974,8 +3397,12 @@ def get_driver(
                     "that has authentication! (If using a proxy server "
                     "without auth, Chrome, Edge, or Firefox may be used.)"
                 )
-        proxy_string = proxy_helper.validate_proxy_string(proxy_string)
-        if proxy_string and proxy_user and proxy_pass:
+        proxy_string, proxy_scheme = proxy_helper.validate_proxy_string(
+            proxy_string, keep_scheme=True
+        )
+        if proxy_user and not proxy_pass:
+            proxy_pass = ""
+        if proxy_string and proxy_user:
             proxy_auth = True
     elif proxy_pac_url:
         username_and_password = None
@@ -3002,7 +3429,9 @@ def get_driver(
                 )
         if not proxy_pac_url.lower().endswith(".pac"):
             raise Exception('The proxy PAC URL must end with ".pac"!')
-        if proxy_pac_url and proxy_user and proxy_pass:
+        if proxy_user and not proxy_pass:
+            proxy_pass = ""
+        if proxy_pac_url and proxy_user:
             proxy_auth = True
     if (
         is_using_uc(undetectable, browser_name)
@@ -3063,6 +3492,7 @@ def get_driver(
             proxy_auth,
             proxy_user,
             proxy_pass,
+            proxy_scheme,
             proxy_bypass_list,
             proxy_pac_url,
             multi_proxy,
@@ -3123,6 +3553,7 @@ def get_driver(
             proxy_auth,
             proxy_user,
             proxy_pass,
+            proxy_scheme,
             proxy_bypass_list,
             proxy_pac_url,
             multi_proxy,
@@ -3183,6 +3614,7 @@ def get_remote_driver(
     proxy_auth,
     proxy_user,
     proxy_pass,
+    proxy_scheme,
     proxy_bypass_list,
     proxy_pac_url,
     multi_proxy,
@@ -3293,7 +3725,6 @@ def get_remote_driver(
         from seleniumbase.core import capabilities_parser
         desired_caps = capabilities_parser.get_desired_capabilities(cap_file)
     if cap_string:
-        import json
         try:
             extra_caps = json.loads(str(cap_string))
         except Exception as e:
@@ -3324,6 +3755,7 @@ def get_remote_driver(
             proxy_auth,
             proxy_user,
             proxy_pass,
+            proxy_scheme,
             proxy_bypass_list,
             proxy_pac_url,
             multi_proxy,
@@ -3500,6 +3932,7 @@ def get_remote_driver(
             proxy_auth,
             proxy_user,
             proxy_pass,
+            proxy_scheme,
             proxy_bypass_list,
             proxy_pac_url,
             multi_proxy,
@@ -3621,6 +4054,7 @@ def get_local_driver(
     proxy_auth,
     proxy_user,
     proxy_pass,
+    proxy_scheme,
     proxy_bypass_list,
     proxy_pac_url,
     multi_proxy,
@@ -3671,6 +4105,53 @@ def get_local_driver(
     """Spins up a new web browser and returns the driver.
     Can also be used to spin up additional browsers for the same test."""
     downloads_path = DOWNLOADS_FOLDER
+    driver_dir = DRIVER_DIR
+    special_chrome = False
+    if binary_location:
+        if (
+            binary_location == "_chromium_"
+            or "chromium_drivers" in binary_location
+        ):
+            special_chrome = True
+            driver_dir = DRIVER_DIR_CHROMIUM
+        elif binary_location == "cft" or "cft_drivers" in binary_location:
+            special_chrome = True
+            driver_dir = DRIVER_DIR_CFT
+        elif binary_location == "chs" or "chs_drivers" in binary_location:
+            special_chrome = True
+            driver_dir = DRIVER_DIR_CHS
+        elif _special_binary_exists(binary_location, "opera"):
+            special_chrome = True
+            driver_dir = DRIVER_DIR_OPERA
+        elif _special_binary_exists(binary_location, "brave"):
+            special_chrome = True
+            driver_dir = DRIVER_DIR_BRAVE
+        elif _special_binary_exists(binary_location, "comet"):
+            special_chrome = True
+            driver_dir = DRIVER_DIR_COMET
+        elif _special_binary_exists(binary_location, "atlas"):
+            special_chrome = True
+            driver_dir = DRIVER_DIR_ATLAS
+    if (
+        hasattr(sb_config, "settings")
+        and getattr(sb_config.settings, "NEW_DRIVER_DIR", None)
+        and os.path.exists(sb_config.settings.NEW_DRIVER_DIR)
+    ):
+        driver_dir = sb_config.settings.NEW_DRIVER_DIR
+    elif special_chrome:
+        override_driver_dir(driver_dir)
+    if IS_MAC or IS_LINUX:
+        local_chromedriver = driver_dir + "/chromedriver"
+        local_geckodriver = driver_dir + "/geckodriver"
+        local_edgedriver = driver_dir + "/msedgedriver"
+        local_uc_driver = driver_dir + "/uc_driver"
+    elif IS_WINDOWS:
+        local_edgedriver = driver_dir + "/msedgedriver.exe"
+        local_iedriver = driver_dir + "/IEDriverServer.exe"
+        local_headless_iedriver = driver_dir + "/headless_ie_selenium.exe"
+        local_chromedriver = driver_dir + "/chromedriver.exe"
+        local_geckodriver = driver_dir + "/geckodriver.exe"
+        local_uc_driver = driver_dir + "/uc_driver.exe"
     b_path = binary_location
     use_uc = is_using_uc(undetectable, browser_name)
     if use_wire:
@@ -3718,9 +4199,9 @@ def get_local_driver(
             firefox_pref,
             external_pdf,
         )
-        if LOCAL_GECKODRIVER and os.path.exists(LOCAL_GECKODRIVER):
+        if local_geckodriver and os.path.exists(local_geckodriver):
             try:
-                make_driver_executable_if_not(LOCAL_GECKODRIVER)
+                make_driver_executable_if_not(local_geckodriver)
             except Exception as e:
                 logging.debug(
                     "\nWarning: Could not make geckodriver"
@@ -3756,9 +4237,9 @@ def get_local_driver(
                         sb_install.main(override="geckodriver")
                         sys.argv = sys_args  # Put back original sys args
         # Launch Firefox
-        if os.path.exists(LOCAL_GECKODRIVER):
+        if os.path.exists(local_geckodriver):
             service = FirefoxService(
-                executable_path=LOCAL_GECKODRIVER,
+                executable_path=local_geckodriver,
                 log_output=os.devnull,
             )
             try:
@@ -3859,9 +4340,9 @@ def get_local_driver(
         ie_options.native_events = True
         ie_options.full_page_screenshot = True
         ie_options.persistent_hover = True
-        if LOCAL_IEDRIVER and os.path.exists(LOCAL_IEDRIVER):
+        if local_iedriver and os.path.exists(local_iedriver):
             try:
-                make_driver_executable_if_not(LOCAL_IEDRIVER)
+                make_driver_executable_if_not(local_iedriver)
             except Exception as e:
                 logging.debug(
                     "\nWarning: Could not make IEDriver executable: %s" % e
@@ -3875,9 +4356,9 @@ def get_local_driver(
                 log_d("\nWarning: IEDriver not found. Getting it now:")
                 sb_install.main(override="iedriver")
                 sys.argv = sys_args  # Put back the original sys args
-        if LOCAL_HEADLESS_IEDRIVER and os.path.exists(LOCAL_HEADLESS_IEDRIVER):
+        if local_headless_iedriver and os.path.exists(local_headless_iedriver):
             try:
-                make_driver_executable_if_not(LOCAL_HEADLESS_IEDRIVER)
+                make_driver_executable_if_not(local_headless_iedriver)
             except Exception as e:
                 logging.debug(
                     "\nWarning: Could not make HeadlessIEDriver executable: %s"
@@ -3903,7 +4384,7 @@ def get_local_driver(
         else:
             warnings.simplefilter("ignore", category=DeprecationWarning)
             service = Service(
-                executable_path=LOCAL_IEDRIVER,
+                executable_path=local_iedriver,
                 service_args=[d_b_c],
                 log_output=os.devnull,
             )
@@ -3915,6 +4396,7 @@ def get_local_driver(
             "download.directory_upgrade": True,
             "download.prompt_for_download": False,
             "credentials_enable_service": False,
+            "autofill.credit_card_enabled": False,
             "local_discovery.notifications_enabled": False,
             "safebrowsing.disable_download_protection": True,
             "safebrowsing.enabled": False,  # Prevent PW "data breach" pop-ups
@@ -3985,10 +4467,10 @@ def get_local_driver(
             use_version = major_edge_version
         edge_driver_version = None
         edgedriver_upgrade_needed = False
-        if os.path.exists(LOCAL_EDGEDRIVER):
+        if os.path.exists(local_edgedriver):
             with suppress(Exception):
                 output = subprocess.check_output(
-                    '"%s" --version' % LOCAL_EDGEDRIVER, shell=True
+                    '"%s" --version' % local_edgedriver, shell=True
                 )
                 if IS_WINDOWS:
                     output = output.decode("latin1")
@@ -4016,7 +4498,7 @@ def get_local_driver(
             use_version, driver_version
         )
         local_edgedriver_exists = False
-        if LOCAL_EDGEDRIVER and os.path.exists(LOCAL_EDGEDRIVER):
+        if local_edgedriver and os.path.exists(local_edgedriver):
             local_edgedriver_exists = True
             if (
                 use_version != "latest"
@@ -4026,7 +4508,7 @@ def get_local_driver(
                 edgedriver_upgrade_needed = True
             else:
                 try:
-                    make_driver_executable_if_not(LOCAL_EDGEDRIVER)
+                    make_driver_executable_if_not(local_edgedriver)
                 except Exception as e:
                     logging.debug(
                         "\nWarning: Could not make edgedriver"
@@ -4062,11 +4544,11 @@ def get_local_driver(
                     sys.argv = sys_args  # Put back the original sys args
 
         # For Microsoft Edge (Chromium) version 80 or higher
-        Edge = webdriver.edge.webdriver.WebDriver
-        EdgeOptions = webdriver.edge.webdriver.Options
-        if LOCAL_EDGEDRIVER and os.path.exists(LOCAL_EDGEDRIVER):
+        Edge = webdriver.Edge
+        EdgeOptions = webdriver.EdgeOptions
+        if local_edgedriver and os.path.exists(local_edgedriver):
             try:
-                make_driver_executable_if_not(LOCAL_EDGEDRIVER)
+                make_driver_executable_if_not(local_edgedriver)
             except Exception as e:
                 logging.debug(
                     "\nWarning: Could not make edgedriver"
@@ -4217,12 +4699,12 @@ def get_local_driver(
             # Can be a comma-separated list of .ZIP or .CRX files
             extension_zip_list = extension_zip.split(",")
             for extension_zip_item in extension_zip_list:
-                abs_path = os.path.abspath(extension_zip_item)
+                abs_path = os.path.realpath(extension_zip_item)
                 edge_options.add_extension(abs_path)
         if extension_dir:
             # load-extension input can be a comma-separated list
             abs_path = (
-                ",".join(os.path.abspath(p) for p in extension_dir.split(","))
+                ",".join(os.path.realpath(p) for p in extension_dir.split(","))
             )
             edge_options = add_chrome_ext_dir(edge_options, abs_path)
         edge_options.add_argument("--disable-infobars")
@@ -4262,8 +4744,7 @@ def get_local_driver(
             edge_options.page_load_strategy = page_load_strategy.lower()
         elif (
             not page_load_strategy
-            and hasattr(settings, "PAGE_LOAD_STRATEGY")
-            and settings.PAGE_LOAD_STRATEGY
+            and getattr(settings, "PAGE_LOAD_STRATEGY", None)
             and settings.PAGE_LOAD_STRATEGY.lower() in ["eager", "none"]
         ):
             # Only change it if not "normal", which is the default.
@@ -4285,6 +4766,7 @@ def get_local_driver(
                     proxy_string,
                     proxy_user,
                     proxy_pass,
+                    proxy_scheme,
                     proxy_bypass_list,
                     zip_it=True,
                     multi_proxy=multi_proxy,
@@ -4301,6 +4783,7 @@ def get_local_driver(
                     None,
                     proxy_user,
                     proxy_pass,
+                    proxy_scheme,
                     proxy_bypass_list,
                     zip_it=True,
                     multi_proxy=multi_proxy,
@@ -4372,6 +4855,7 @@ def get_local_driver(
         included_disabled_features.append("OptimizationHints")
         included_disabled_features.append("OptimizationHintsFetching")
         included_disabled_features.append("Translate")
+        included_disabled_features.append("ComponentUpdater")
         included_disabled_features.append("OptimizationTargetPrediction")
         included_disabled_features.append("OptimizationGuideModelDownloading")
         included_disabled_features.append("InsecureDownloadWarnings")
@@ -4379,6 +4863,14 @@ def get_local_driver(
         included_disabled_features.append("PrivacySandboxSettings4")
         included_disabled_features.append("SidePanelPinning")
         included_disabled_features.append("UserAgentClientHint")
+        included_disabled_features.append(
+            "DisableLoadExtensionCommandLineSwitch"
+        )
+        included_disabled_features.append("Bluetooth")
+        included_disabled_features.append("WebBluetooth")
+        included_disabled_features.append("UnifiedWebBluetooth")
+        included_disabled_features.append("WebAuthentication")
+        included_disabled_features.append("PasskeyAuth")
         for item in extra_disabled_features:
             if item not in included_disabled_features:
                 included_disabled_features.append(item)
@@ -4392,7 +4884,7 @@ def get_local_driver(
         if binary_location:
             edge_options.binary_location = binary_location
         service = EdgeService(
-            executable_path=LOCAL_EDGEDRIVER,
+            executable_path=local_edgedriver,
             log_output=os.devnull,
             service_args=["--disable-build-check"],
         )
@@ -4470,8 +4962,7 @@ def get_local_driver(
             options.page_load_strategy = page_load_strategy.lower()
         elif (
             not page_load_strategy
-            and hasattr(settings, "PAGE_LOAD_STRATEGY")
-            and settings.PAGE_LOAD_STRATEGY
+            and getattr(settings, "PAGE_LOAD_STRATEGY", None)
             and settings.PAGE_LOAD_STRATEGY.lower() in ["eager", "none"]
         ):
             # Only change it if not "normal", which is the default.
@@ -4481,6 +4972,27 @@ def get_local_driver(
         )
         return extend_driver(driver)
     elif browser_name == constants.Browser.GOOGLE_CHROME:
+        set_chromium = None
+        if _special_binary_exists(binary_location, "opera"):
+            set_chromium = "opera"
+            local_chromedriver = DRIVER_DIR_OPERA + "/chromedriver"
+            if IS_WINDOWS:
+                local_chromedriver = DRIVER_DIR_OPERA + "/chromedriver.exe"
+        if _special_binary_exists(binary_location, "brave"):
+            set_chromium = "brave"
+            local_chromedriver = DRIVER_DIR_BRAVE + "/chromedriver"
+            if IS_WINDOWS:
+                local_chromedriver = DRIVER_DIR_BRAVE + "/chromedriver.exe"
+        if _special_binary_exists(binary_location, "comet"):
+            set_chromium = "comet"
+            local_chromedriver = DRIVER_DIR_COMET + "/chromedriver"
+            if IS_WINDOWS:
+                local_chromedriver = DRIVER_DIR_COMET + "/chromedriver.exe"
+        if _special_binary_exists(binary_location, "atlas"):
+            set_chromium = "atlas"
+            local_chromedriver = DRIVER_DIR_ATLAS + "/chromedriver"
+            if IS_WINDOWS:
+                local_chromedriver = DRIVER_DIR_ATLAS + "/chromedriver.exe"
         try:
             chrome_options = _set_chrome_options(
                 browser_name,
@@ -4491,6 +5003,7 @@ def get_local_driver(
                 proxy_auth,
                 proxy_user,
                 proxy_pass,
+                proxy_scheme,
                 proxy_bypass_list,
                 proxy_pac_url,
                 multi_proxy,
@@ -4537,6 +5050,8 @@ def get_local_driver(
                 device_height,
                 device_pixel_ratio,
             )
+            if binary_location and "chromium_drivers" in binary_location:
+                chrome_options.add_argument("--use-mock-keychain")
             use_version = "latest"
             major_chrome_version = None
             saved_mcv = None
@@ -4601,12 +5116,18 @@ def get_local_driver(
                 major_chrome_version = None
             if major_chrome_version:
                 use_version = major_chrome_version
+            if (
+                set_chromium == "opera"
+                and use_version.isnumeric()
+                and int(use_version) < 130
+            ):
+                use_version = "130"  # Special case
             ch_driver_version = None
             path_chromedriver = chromedriver_on_path()
-            if os.path.exists(LOCAL_CHROMEDRIVER):
+            if os.path.exists(local_chromedriver):
                 with suppress(Exception):
                     output = subprocess.check_output(
-                        '"%s" --version' % LOCAL_CHROMEDRIVER, shell=True
+                        '"%s" --version' % local_chromedriver, shell=True
                     )
                     if IS_WINDOWS:
                         output = output.decode("latin1")
@@ -4618,7 +5139,7 @@ def get_local_driver(
                         ch_driver_version = output
                         if driver_version == "keep":
                             driver_version = ch_driver_version
-            elif path_chromedriver:
+            elif path_chromedriver and not set_chromium:
                 try:
                     make_driver_executable_if_not(path_chromedriver)
                 except Exception as e:
@@ -4644,10 +5165,14 @@ def get_local_driver(
             uc_driver_version = None
             if use_uc:
                 if use_br_version_for_uc or driver_version == "mlatest":
-                    uc_driver_version = get_uc_driver_version(full=True)
+                    uc_driver_version = get_uc_driver_version(
+                        full=True, local_uc_driver=local_uc_driver
+                    )
                     full_ch_driver_version = uc_driver_version
                 else:
-                    uc_driver_version = get_uc_driver_version()
+                    uc_driver_version = get_uc_driver_version(
+                        local_uc_driver=local_uc_driver
+                    )
                 if multi_proxy:
                     sb_config.multi_proxy = True
                 if uc_driver_version and driver_version == "keep":
@@ -4695,9 +5220,9 @@ def get_local_driver(
                         chrome_options.add_argument("--headless=old")
                     else:
                         chrome_options.add_argument("--headless")
-            if LOCAL_CHROMEDRIVER and os.path.exists(LOCAL_CHROMEDRIVER):
+            if local_chromedriver and os.path.exists(local_chromedriver):
                 try:
-                    make_driver_executable_if_not(LOCAL_CHROMEDRIVER)
+                    make_driver_executable_if_not(local_chromedriver)
                 except Exception as e:
                     logging.debug(
                         "\nWarning: Could not make chromedriver"
@@ -4705,9 +5230,9 @@ def get_local_driver(
                     )
             make_uc_driver_from_chromedriver = False
             local_ch_exists = (
-                LOCAL_CHROMEDRIVER and os.path.exists(LOCAL_CHROMEDRIVER)
+                local_chromedriver and os.path.exists(local_chromedriver)
             )
-            """If no LOCAL_CHROMEDRIVER, but path_chromedriver, and the
+            """If no local_chromedriver, but path_chromedriver, and the
             browser version nearly matches the driver version, then use
             the path_chromedriver instead of downloading a new driver.
             Eg. 116.0.* for both is close, but not 116.0.* and 116.1.*"""
@@ -4724,6 +5249,15 @@ def get_local_driver(
                     or driver_version == "keep"
                 ):
                     browser_driver_close_match = True
+            one_off_chromium = False
+            if (
+                hasattr(sb_config, "binary_location")
+                and sb_config.binary_location == "_chromium_"
+            ):
+                with suppress(Exception):
+                    one_off_chromium_ver = int(use_version.split(".")[0]) - 1
+                    if one_off_chromium_ver == int(ch_driver_version):
+                        one_off_chromium = True
             # If not ARM MAC and need to use uc_driver (and it's missing),
             # and already have chromedriver with the correct version,
             # then copy chromedriver to uc_driver (and it'll get patched).
@@ -4735,32 +5269,36 @@ def get_local_driver(
                         (local_ch_exists or path_chromedriver)
                         and use_version == ch_driver_version
                         and (
-                            not os.path.exists(LOCAL_UC_DRIVER)
+                            not os.path.exists(local_uc_driver)
                             or uc_driver_version != use_version
                         )
                     )
                     or (
                         local_ch_exists
                         and use_version == "latest"
-                        and not os.path.exists(LOCAL_UC_DRIVER)
+                        and not os.path.exists(local_uc_driver)
                     )
                 )
             ):
                 make_uc_driver_from_chromedriver = True
             elif (
-                (use_uc and not os.path.exists(LOCAL_UC_DRIVER))
+                (use_uc and not os.path.exists(local_uc_driver))
                 or (not use_uc and not path_chromedriver)
                 or (
                     not use_uc
                     and use_version != "latest"  # Browser version detected
                     and (ch_driver_version or not local_ch_exists)
                     and (
-                        use_version.split(".")[0] != ch_driver_version
+                        (
+                            use_version.split(".")[0] != ch_driver_version
+                            and not one_off_chromium
+                        )
                         or (
                             not local_ch_exists
                             and use_version.isnumeric()
                             and int(use_version) >= 115
                             and not browser_driver_close_match
+                            and not one_off_chromium
                         )
                     )
                 )
@@ -4768,12 +5306,14 @@ def get_local_driver(
                     use_uc
                     and use_version != "latest"  # Browser version detected
                     and uc_driver_version != use_version
+                    and not one_off_chromium
                 )
                 or (
                     full_ch_driver_version  # Also used for the uc_driver
                     and driver_version
                     and len(str(driver_version).split(".")) == 4
                     and full_ch_driver_version != driver_version
+                    and not one_off_chromium
                 )
             ):
                 # chromedriver download needed in the seleniumbase/drivers dir
@@ -4785,9 +5325,9 @@ def get_local_driver(
                     msg = "chromedriver update needed. Getting it now:"
                     if not path_chromedriver:
                         msg = "chromedriver not found. Getting it now:"
-                    if use_uc and not os.path.exists(LOCAL_UC_DRIVER):
+                    if use_uc and not os.path.exists(local_uc_driver):
                         msg = "uc_driver not found. Getting it now:"
-                    if use_uc and os.path.exists(LOCAL_UC_DRIVER):
+                    if use_uc and os.path.exists(local_uc_driver):
                         msg = "uc_driver update needed. Getting it now:"
                     log_d("\nWarning: %s" % msg)
                     force_uc = False
@@ -4836,9 +5376,9 @@ def get_local_driver(
                         msg = "chromedriver update needed. Getting it now:"
                         if not path_chromedriver:
                             msg = "chromedriver not found. Getting it now:"
-                        if use_uc and not os.path.exists(LOCAL_UC_DRIVER):
+                        if use_uc and not os.path.exists(local_uc_driver):
                             msg = "uc_driver not found. Getting it now:"
-                        if use_uc and os.path.exists(LOCAL_UC_DRIVER):
+                        if use_uc and os.path.exists(local_uc_driver):
                             msg = "uc_driver update needed. Getting it now:"
                         force_uc = False
                         intel_for_uc = False
@@ -4846,10 +5386,10 @@ def get_local_driver(
                             force_uc = True
                         if IS_ARM_MAC and use_uc:
                             intel_for_uc = True  # Use Intel driver for UC Mode
-                        if os.path.exists(LOCAL_CHROMEDRIVER):
+                        if os.path.exists(local_chromedriver):
                             with suppress(Exception):
                                 output = subprocess.check_output(
-                                    '"%s" --version' % LOCAL_CHROMEDRIVER,
+                                    '"%s" --version' % local_chromedriver,
                                     shell=True,
                                 )
                                 if IS_WINDOWS:
@@ -4863,9 +5403,9 @@ def get_local_driver(
                         if (
                             (
                                 not use_uc
-                                and not os.path.exists(LOCAL_CHROMEDRIVER)
+                                and not os.path.exists(local_chromedriver)
                             )
-                            or (use_uc and not os.path.exists(LOCAL_UC_DRIVER))
+                            or (use_uc and not os.path.exists(local_uc_driver))
                             or (
                                 not use_uc
                                 and (
@@ -4877,7 +5417,9 @@ def get_local_driver(
                                 use_uc
                                 and (
                                     use_version.split(".")[0]
-                                    != get_uc_driver_version()
+                                    != get_uc_driver_version(
+                                        local_uc_driver=local_uc_driver
+                                    )
                                 )
                             )
                         ):
@@ -4929,20 +5471,20 @@ def get_local_driver(
                             constants.MultiBrowser.DRIVER_FIXING_LOCK
                         )
                     if make_uc_driver_from_chromedriver:
-                        if os.path.exists(LOCAL_CHROMEDRIVER):
+                        if os.path.exists(local_chromedriver):
                             with suppress(Exception):
                                 make_driver_executable_if_not(
-                                    LOCAL_CHROMEDRIVER
+                                    local_chromedriver
                                 )
-                            shutil.copy2(LOCAL_CHROMEDRIVER, LOCAL_UC_DRIVER)
+                            shutil.copy2(local_chromedriver, local_uc_driver)
                         elif os.path.exists(path_chromedriver):
                             with suppress(Exception):
                                 make_driver_executable_if_not(
                                     path_chromedriver
                                 )
-                            shutil.copy2(path_chromedriver, LOCAL_UC_DRIVER)
+                            shutil.copy2(path_chromedriver, local_uc_driver)
                         try:
-                            make_driver_executable_if_not(LOCAL_UC_DRIVER)
+                            make_driver_executable_if_not(local_uc_driver)
                         except Exception as e:
                             logging.debug(
                                 "\nWarning: Could not make uc_driver"
@@ -4951,7 +5493,7 @@ def get_local_driver(
             if not headless or not IS_LINUX or use_uc:
                 uc_activated = False
                 try:
-                    if os.path.exists(LOCAL_CHROMEDRIVER) or use_uc:
+                    if os.path.exists(local_chromedriver) or use_uc:
                         if headless and not IS_LINUX:
                             undetectable = False  # No support for headless
                             use_uc = is_using_uc(undetectable, browser_name)
@@ -5029,6 +5571,7 @@ def get_local_driver(
                                         None,  # proxy_auth
                                         None,  # proxy_user
                                         None,  # proxy_pass
+                                        None,  # proxy_scheme
                                         None,  # proxy_bypass_list
                                         None,  # proxy_pac_url
                                         None,  # multi_proxy
@@ -5095,9 +5638,9 @@ def get_local_driver(
                                             force_uc=False,
                                         )
                                     d_b_c = "--disable-build-check"
-                                    if os.path.exists(LOCAL_CHROMEDRIVER):
+                                    if os.path.exists(local_chromedriver):
                                         service = ChromeService(
-                                            executable_path=LOCAL_CHROMEDRIVER,
+                                            executable_path=local_chromedriver,
                                             log_output=os.devnull,
                                             service_args=[d_b_c],
                                         )
@@ -5138,8 +5681,8 @@ def get_local_driver(
                                         sb_config.uc_agent_cache = user_agent
                                     driver.quit()
                             uc_path = None
-                            if os.path.exists(LOCAL_UC_DRIVER):
-                                uc_path = LOCAL_UC_DRIVER
+                            if os.path.exists(local_uc_driver):
+                                uc_path = local_uc_driver
                                 uc_path = os.path.realpath(uc_path)
                             try:
                                 driver = undetected.Chrome(
@@ -5217,7 +5760,7 @@ def get_local_driver(
                                     "w3c", True
                                 )
                             service = ChromeService(
-                                executable_path=LOCAL_CHROMEDRIVER,
+                                executable_path=local_chromedriver,
                                 log_output=os.devnull,
                                 service_args=service_args,
                             )
@@ -5255,7 +5798,9 @@ def get_local_driver(
                             driver = webdriver.Chrome(
                                 service=service, options=chrome_options
                             )
-                            return extend_driver(driver, proxy_auth, use_uc)
+                            return extend_driver(
+                                driver, proxy_auth, use_uc, recorder_ext
+                            )
                     if not auto_upgrade_chromedriver:
                         raise  # Not an obvious fix.
                     else:
@@ -5282,6 +5827,7 @@ def get_local_driver(
                         None,  # proxy_auth
                         None,  # proxy_user
                         None,  # proxy_pass
+                        None,  # proxy_scheme
                         None,  # proxy_bypass_list
                         None,  # proxy_pac_url
                         None,  # multi_proxy
@@ -5349,9 +5895,9 @@ def get_local_driver(
                                 chrome_options, headless_options, mcv
                             )
                         _mark_driver_repaired()
-                    if os.path.exists(LOCAL_CHROMEDRIVER):
+                    if os.path.exists(local_chromedriver):
                         service = ChromeService(
-                            executable_path=LOCAL_CHROMEDRIVER,
+                            executable_path=local_chromedriver,
                             log_output=os.devnull,
                             service_args=["--disable-build-check"],
                         )
@@ -5370,6 +5916,7 @@ def get_local_driver(
                         )
                 driver.default_get = driver.get  # Save copy of original
                 driver.cdp = None  # Set a placeholder
+                driver._is_using_uc = False
                 driver._is_using_cdp = False
                 driver._is_connected = True
                 if uc_activated:
@@ -5404,6 +5951,7 @@ def get_local_driver(
                             driver, *args, **kwargs
                         )
                     )
+                    driver.activate_cdp_mode = driver.uc_activate_cdp_mode
                     driver.uc_open_with_cdp_mode = (
                         lambda *args, **kwargs: uc_open_with_cdp_mode(
                             driver, *args, **kwargs
@@ -5464,6 +6012,12 @@ def get_local_driver(
                             driver, *args, **kwargs
                         )
                     )
+                    driver.default_execute_cdp_cmd = driver.execute_cdp_cmd
+                    driver.execute_cdp_cmd = (
+                        lambda *args, **kwargs: uc_execute_cdp_cmd(
+                            driver, *args, **kwargs
+                        )
+                    )
                     driver._is_hidden = (headless or headless2)
                     driver._is_using_uc = True
                     with suppress(Exception):
@@ -5477,8 +6031,18 @@ def get_local_driver(
                                     time.sleep(0.003)
                             driver.switch_to.window(driver.window_handles[0])
                             time.sleep(0.003)
-                            driver.connect()
-                            time.sleep(0.003)
+                            # seleniumbase/SeleniumBase/discussions/4190
+                            if getattr(sb_config, "skip_133_patch", None):
+                                # To skip the connect() patch for Chrome 133+:
+                                # from seleniumbase import config as sb_config
+                                # sb_config.skip_133_patch = True
+                                # (Do the above before launching the browser.)
+                                pass
+                            else:
+                                # This fixes an issue on Chrome 133+
+                                # (Some people might not need it though.)
+                                driver.connect()
+                                time.sleep(0.003)
                     if mobile_emulator:
                         uc_metrics = {}
                         if (
@@ -5506,11 +6070,17 @@ def get_local_driver(
                                 'Emulation.setDeviceMetricsOverride',
                                 set_device_metrics_override
                             )
-                return extend_driver(driver, proxy_auth, use_uc)
+                else:
+                    driver.get = lambda url: updated_get(driver, url)
+                return extend_driver(
+                    driver, proxy_auth, use_uc, recorder_ext
+                )
             else:  # Running headless on Linux (and not using --uc)
                 try:
                     driver = webdriver.Chrome(options=chrome_options)
-                    return extend_driver(driver, proxy_auth, use_uc)
+                    return extend_driver(
+                        driver, proxy_auth, use_uc, recorder_ext
+                    )
                 except Exception as e:
                     if not hasattr(e, "msg"):
                         raise
@@ -5532,7 +6102,9 @@ def get_local_driver(
                             driver = webdriver.Chrome(
                                 service=service, options=chrome_options
                             )
-                            return extend_driver(driver, proxy_auth, use_uc)
+                            return extend_driver(
+                                driver, proxy_auth, use_uc, recorder_ext
+                            )
                     mcv = None  # Major Chrome Version
                     if "Current browser version is " in e.msg:
                         line = e.msg.split("Current browser version is ")[1]
@@ -5575,7 +6147,9 @@ def get_local_driver(
                                 service=service,
                                 options=chrome_options,
                             )
-                            return extend_driver(driver, proxy_auth, use_uc)
+                            return extend_driver(
+                                driver, proxy_auth, use_uc, recorder_ext
+                            )
                     # Use the virtual display on Linux during headless errors
                     logging.debug(
                         "\nWarning: Chrome failed to launch in"
@@ -5593,7 +6167,9 @@ def get_local_driver(
                     driver = webdriver.Chrome(
                         service=service, options=chrome_options
                     )
-                    return extend_driver(driver, proxy_auth, use_uc)
+                    return extend_driver(
+                        driver, proxy_auth, use_uc, recorder_ext
+                    )
         except Exception as original_exception:
             if use_uc:
                 raise
@@ -5603,7 +6179,9 @@ def get_local_driver(
                 driver = webdriver.Chrome(
                     service=service, options=chrome_options
                 )
-                return extend_driver(driver, proxy_auth, use_uc)
+                return extend_driver(
+                    driver, proxy_auth, use_uc, recorder_ext
+                )
             if user_data_dir:
                 print("\nUnable to set user_data_dir while starting Chrome!\n")
                 raise
@@ -5616,9 +6194,9 @@ def get_local_driver(
             elif headless or headless2 or IS_LINUX or proxy_string or use_wire:
                 raise
             # Try running without any options (bare bones Chrome launch)
-            if LOCAL_CHROMEDRIVER and os.path.exists(LOCAL_CHROMEDRIVER):
+            if local_chromedriver and os.path.exists(local_chromedriver):
                 try:
-                    make_driver_executable_if_not(LOCAL_CHROMEDRIVER)
+                    make_driver_executable_if_not(local_chromedriver)
                 except Exception as e:
                     logging.debug(
                         "\nWarning: Could not make chromedriver"
@@ -5630,7 +6208,9 @@ def get_local_driver(
             )
             try:
                 driver = webdriver.Chrome(service=service)
-                return extend_driver(driver, proxy_auth, use_uc)
+                return extend_driver(
+                    driver, proxy_auth, use_uc, recorder_ext
+                )
             except Exception:
                 raise original_exception
     else:

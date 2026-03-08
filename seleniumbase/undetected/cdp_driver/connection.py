@@ -7,7 +7,7 @@ import json
 import logging
 import sys
 import types
-from asyncio import iscoroutine, iscoroutinefunction
+import warnings
 from typing import (
     Optional,
     Generator,
@@ -33,6 +33,7 @@ GLOBAL_DELAY = 0.005
 MAX_SIZE: int = 2**28
 PING_TIMEOUT: int = 1800  # 30 minutes
 TargetType = Union[cdp.target.TargetInfo, cdp.target.TargetID]
+logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 logger = logging.getLogger("uc.connection")
 
 
@@ -184,13 +185,13 @@ class Connection(metaclass=CantTouchThis):
         self,
         websocket_url=None,
         target=None,
-        _owner=None,
+        browser=None,
         **kwargs,
     ):
         super().__init__()
         self._target = target
         self.__count__ = itertools.count(0)
-        self._owner = _owner
+        self.browser = browser
         self.websocket_url: str = websocket_url
         self.websocket = None
         self.mapper = {}
@@ -273,7 +274,7 @@ class Connection(metaclass=CantTouchThis):
             except (Exception,) as e:
                 logger.debug("Exception during opening of websocket: %s", e)
                 if self.listener:
-                    self.listener.cancel()
+                    await self.listener.cancel()
                 raise
         if not self.listener or not self.listener.running:
             self.listener = Listener(self)
@@ -290,10 +291,6 @@ class Connection(metaclass=CantTouchThis):
         Closes the websocket connection. Shouldn't be called manually by users.
         """
         if self.websocket and self.websocket.state is not State.CLOSED:
-            if self.listener and self.listener.running:
-                self.listener.cancel()
-                self.enabled_domains.clear()
-            await asyncio.sleep(0.015)
             try:
                 await self.websocket.close()
             except Exception:
@@ -301,6 +298,9 @@ class Connection(metaclass=CantTouchThis):
                     "\n❌ Error closing websocket connection to %s",
                     self.websocket_url
                 )
+            if self.listener and self.listener.running:
+                await self.listener.cancel()
+                self.enabled_domains.clear()
             logger.debug(
                 "\n❌ Closed websocket connection to %s", self.websocket_url
             )
@@ -347,7 +347,38 @@ class Connection(metaclass=CantTouchThis):
 
     async def set_locale(self, locale: Optional[str] = None):
         """Sets the Language Locale code via set_user_agent_override."""
-        await self.send(cdp.network.set_user_agent_override("", locale))
+        await self.set_user_agent(user_agent="", accept_language=locale)
+        await self.send(cdp.emulation.set_locale_override(locale))
+
+    async def set_timezone(self, timezone: Optional[str] = None):
+        """Sets the Timezone via set_timezone_override."""
+        await self.send(cdp.emulation.set_timezone_override(timezone))
+
+    async def set_user_agent(
+        self,
+        user_agent: Optional[str] = "",
+        accept_language: Optional[str] = None,
+        platform: Optional[str] = None,  # navigator.platform
+    ):
+        """Sets the User Agent via set_user_agent_override."""
+        if not user_agent:
+            user_agent = ""
+        await self.send(cdp.network.set_user_agent_override(
+            user_agent=user_agent,
+            accept_language=accept_language,
+            platform=platform,
+        ))
+
+    async def set_geolocation(self, geolocation: Optional[tuple] = None):
+        """Sets the User Agent via set_geolocation_override."""
+        await self.send(cdp.browser.set_permission(
+            permission={"name": "geolocation"}, setting="granted"
+        ))
+        await self.send(cdp.emulation.set_geolocation_override(
+            latitude=geolocation[0],
+            longitude=geolocation[1],
+            accuracy=100,
+        ))
 
     def __getattr__(self, item):
         """:meta private:"""
@@ -396,8 +427,8 @@ class Connection(metaclass=CantTouchThis):
         await self.aopen()
         if not self.websocket or self.websocket.state is State.CLOSED:
             return
-        if self._owner:
-            browser = self._owner
+        if self.browser:
+            browser = self.browser
             if browser.config:
                 if browser.config.expert:
                     await self._prepare_expert()
@@ -415,11 +446,17 @@ class Connection(metaclass=CantTouchThis):
             if not _is_update:
                 await self._register_handlers()
             await self.websocket.send(tx.message)
-            try:
-                return await tx
-            except ProtocolException as e:
-                e.message += f"\ncommand:{tx.method}\nparams:{tx.params}"
-                raise e
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="coroutine .* was never awaited",
+                    category=RuntimeWarning,
+                )
+                try:
+                    return await tx
+                except ProtocolException as e:
+                    e.message += f"\ncommand:{tx.method}\nparams:{tx.params}"
+                    raise e
         except Exception:
             await self.aclose()
 
@@ -460,8 +497,6 @@ class Connection(metaclass=CantTouchThis):
                     except BaseException:
                         logger.debug("NOT GOOD", exc_info=True)
                         continue
-                finally:
-                    continue
         for ed in enabled_domains:
             # Items still present at this point are unused and need removal.
             self.enabled_domains.remove(ed)
@@ -525,9 +560,13 @@ class Listener:
     def time_before_considered_idle(self, seconds: Union[int, float]):
         self._time_before_considered_idle = seconds
 
-    def cancel(self):
+    async def cancel(self):
         if self.task and not self.task.cancelled():
             self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
 
     @property
     def running(self):
@@ -547,18 +586,19 @@ class Listener:
             except asyncio.TimeoutError:
                 self.idle.set()
                 # Pause for a moment.
-                # await asyncio.sleep(self.time_before_considered_idle / 10)
-                await asyncio.sleep(0.015)
+                await asyncio.sleep(self.time_before_considered_idle / 10)
                 continue
             except (Exception,) as e:
                 logger.debug(
                     "Connection listener exception "
                     "while reading websocket:\n%s", e
                 )
+                self.idle.set()
                 break
             if not self.running:
                 # If we have been cancelled or otherwise stopped running,
                 # then break this loop.
+                self.idle.set()
                 break
             self.idle.clear()  # Not "idle" anymore.
             message = json.loads(msg)
@@ -579,11 +619,11 @@ class Listener:
                 # Probably an event
                 try:
                     event = cdp.util.parse_json_event(message)
-                    event_tx = EventTransaction(event)
-                    if not self.connection.mapper:
-                        self.connection.__count__ = itertools.count(0)
-                    event_tx.id = next(self.connection.__count__)
-                    self.connection.mapper[event_tx.id] = event_tx
+                    # event_tx = EventTransaction(event)
+                    # if not self.connection.mapper:
+                    #     self.connection.__count__ = itertools.count(0)
+                    # event_tx.id = next(self.connection.__count__)
+                    # self.connection.mapper[event_tx.id] = event_tx
                 except Exception as e:
                     logger.info(
                         "%s: %s during parsing of json from event : %s"
@@ -604,13 +644,15 @@ class Listener:
                     for callback in callbacks:
                         try:
                             if (
-                                iscoroutinefunction(callback)
-                                or iscoroutine(callback)
+                                inspect.iscoroutinefunction(callback)
+                                or inspect.iscoroutine(callback)
                             ):
                                 try:
-                                    await callback(event, self.connection)
+                                    asyncio.create_task(
+                                        callback(event, self.connection)
+                                    )
                                 except TypeError:
-                                    await callback(event)
+                                    asyncio.create_task(callback(event))
                             else:
                                 try:
                                     callback(event, self.connection)

@@ -6,7 +6,7 @@ To run web automation, you'll need webdrivers for each browser you plan on using
 
 🎛️ You can also download drivers manually with these commands:
 
-```bash
+```zsh
 seleniumbase get chromedriver
 seleniumbase get geckodriver
 seleniumbase get edgedriver
@@ -18,7 +18,7 @@ If the necessary driver is not found in this location while running tests, Selen
 
 🎛️ You can also download specific versions of drivers. Examples:
 
-```bash
+```zsh
 sbase get chromedriver 114
 sbase get chromedriver 114.0.5735.90
 sbase get chromedriver stable
@@ -38,13 +38,17 @@ sbase get edgedriver 115.0.1901.183
 
 🎛️ Use the `sbase get` command to download the `Chrome for Testing` and `Chrome-Headless-Shell` browser binaries. Example:
 
-```bash
+```zsh
+sbase get chromium  # (For base `Chromium`)
 sbase get cft  # (For `Chrome for Testing`)
 sbase get chs  # (For `Chrome-Headless-Shell`)
 ```
 
-Those commands download those binaries into the `seleniumbase/drivers` folder.
-To use the binaries from there in SeleniumBase scripts, set the `binary_location` to `cft` or `chs`.
+Those commands download those binaries into the `seleniumbase/drivers` folder. (There are subfolders, such as `cft_drivers`, `chs_drivers`, and `chromium_drivers`.)
+
+To use the base `Chromium` binary in SeleniumBase scripts, add `--use-chromium` on the command-line, or set `use_chromium=True` from within scripts.
+
+To use the `cft` or `chs` binaries in SeleniumBase scripts, set the `binary_location` to `cft` or `chs`, use `--cft` / `--chs` or set `cft=True` / `chs=True`.
 
 (Source: https://googlechromelabs.github.io/chrome-for-testing/)
 

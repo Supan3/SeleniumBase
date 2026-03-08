@@ -1,12 +1,12 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) SeleniumBase Commander 🎖️
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> SeleniumBase Commander 🎖️</h2>
 
 🎖️ <b translate="no">SeleniumBase Commander</b> lets you run <code translate="no">pytest</code> scripts from a Desktop GUI.<br>
 
 🎖️ To launch it, call ``sbase commander`` or ``sbase gui``:
 
-```bash
+```zsh
 sbase gui
 * Starting the SeleniumBase Commander Desktop App...
 ```
@@ -15,20 +15,20 @@ sbase gui
 
 🎖️ <b translate="no">SeleniumBase Commander</b> loads the same tests that are found by:
 
-```bash
+```zsh
 pytest --co -q
 ```
 
 🎖️ You can customize which tests are loaded by passing additional args:
 
-```bash
+```zsh
 sbase commander [OPTIONAL PATH or TEST FILE]
 sbase gui [OPTIONAL PATH or TEST FILE]
 ```
 
 🎖️ Here are examples of customizing test collection:
 
-```bash
+```zsh
 sbase gui
 sbase gui -k agent
 sbase gui -m marker2

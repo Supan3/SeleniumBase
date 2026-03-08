@@ -10,7 +10,7 @@ edit_uri: ""
 site_dir: "site"
 docs_dir: "mkdocs_build"
 # Copyright
-copyright: Copyright &copy; 2014 - 2024 Michael Mintz
+copyright: Copyright &copy; 2014 - 2026 Michael Mintz
 # Extensions
 markdown_extensions:
   - admonition
@@ -74,7 +74,6 @@ plugins:
         - SECURITY.md
         - examples/case_summary.md
         - examples/migration/raw_selenium/ReadMe.md
-        - help_docs/chinese.md
         - integrations/katalon/ReadMe.md
         - help_docs/ReadMe.md
         - help_docs/verify_webdriver.md
@@ -95,19 +94,20 @@ nav:
   - 🏰 List of Features: help_docs/features_list.md
   - 📚 Running Example Tests: examples/ReadMe.md
   - 🎛️ Command Line Options: help_docs/customizing_test_runs.md
-  - 🌠 Console Scripts: seleniumbase/console_scripts/ReadMe.md
+  - 🪄 Console Scripts: seleniumbase/console_scripts/ReadMe.md
   - 📊 Dashboard / Reports: examples/example_logs/ReadMe.md
   - 🔡 Syntax Formats: help_docs/syntax_formats.md
   - 🎖️ GUI / Commander: help_docs/commander.md
   - 🔴 Recorder Mode: help_docs/recorder_mode.md
   - 📘 API Reference: help_docs/method_summary.md
+  - 📗 CDP Mode APIs: help_docs/cdp_mode_methods.md
   - Python Setup / Install:
     - 🐉 Get Python, pip, & git: help_docs/install_python_pip_git.md
     - ⚙️ Virtualenv Instructions: help_docs/virtualenv_instructions.md
     - 🏄 Install SeleniumBase: help_docs/install.md
     - 👁️ How it Works: help_docs/how_it_works.md
   - JS Manager / JS Tools:
-    - 🕹️ Package Manager: help_docs/js_package_manager.md
+    - ❇️ JS Package Manager: help_docs/js_package_manager.md
     - 🎦 Demo Mode: help_docs/demo_mode.md
     - 🚎 Tour Maker: examples/tour_examples/ReadMe.md
     - 🛂 Dialog Boxes: examples/dialog_boxes/ReadMe.md
@@ -117,6 +117,7 @@ nav:
   - Integrations:
     - 👤 UC Mode: help_docs/uc_mode.md
     - 🐙 CDP Mode: examples/cdp_mode/ReadMe.md
+    - 🎭 Stealthy Playwright: examples/cdp_mode/playwright/ReadMe.md
     - 🤖 GitHub CI: integrations/github/workflows/ReadMe.md
     - 🛂 MasterQA: seleniumbase/masterqa/ReadMe.md
     - 🗂️ Case Plans: help_docs/case_plans.md
@@ -182,7 +183,6 @@ nav:
     - 🐝 Behave-BDD GUI App: help_docs/behave_gui.md
   - Languages:
     - 🌏 Translations: help_docs/translations.md
-    - 🐲 Chinese Docs: help_docs/chinese.md
     - 🗾 Locale Codes: help_docs/locale_codes.md
   - Other:
     - 📺 YouTube Link: https://www.youtube.com/playlist?list=PLp9uKicxkBc5UIlGi2BuE3aWC7JyXpD3m

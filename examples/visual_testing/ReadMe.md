@@ -2,7 +2,7 @@
 
 <p align="center"><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/cdn/img/sb_logo_f6.png" alt="SeleniumBase" width="445" /></a></p>
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Automated Visual Regression Testing
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> Automated Visual Regression Testing</h2>
 
 Automated Visual Regression Testing can help you detect when the layout of a web page has changed. Instead of comparing pixels from screenshots, layout differences can be detected by comparing HTML tags and attributes with a baseline. If a change is detected, it could mean that something broke, the web page was redesigned, or dynamic content changed.
 
@@ -44,7 +44,7 @@ As shown, Level-3 is the most strict, Level-1 is the least strict. If the compar
 
 You can reset the visual baseline on the command line by adding the following parameter at runtime:
 
-```bash
+```zsh
 --visual_baseline
 ```
 
@@ -180,7 +180,7 @@ First differing element 22:
 
 To run the example (from [examples/visual_testing/](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/visual_testing/)) with a pytest HTML Report, use:
 
-```bash
+```zsh
 pytest test_layout_fail.py --html=report.html
 ```
 

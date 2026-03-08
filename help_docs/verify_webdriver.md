@@ -1,12 +1,12 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Verifying that web drivers are installed
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> Verifying that web drivers are installed</h2>
 
 On newer versions of SeleniumBase, the driver is automatically downloaded to the ``seleniumbase/drivers`` folder as needed, and does not need to be on the System Path when running tests.
 
 Drivers can be manually downloaded to the ``seleniumbase/drivers`` folder with commands such as:
 
-```bash
+```zsh
 sbase get chromedriver
 sbase get geckodriver
 sbase get edgedriver
@@ -18,7 +18,7 @@ If you want to check that you have the correct driver installed on your System P
 
 *This assumes you've already downloaded a driver to your **System PATH** with a command such as:*
 
-```bash
+```zsh
 sbase get chromedriver --path
 ```
 
@@ -28,7 +28,7 @@ sbase get chromedriver --path
 
 #### Verifying ChromeDriver
 
-```bash
+```zsh
 python
 ```
 
@@ -42,7 +42,7 @@ python
 
 #### Verifying Geckodriver (Firefox WebDriver)
 
-```bash
+```zsh
 python
 ```
 
@@ -56,7 +56,7 @@ python
 
 #### Verifying WebDriver for Safari
 
-```bash
+```zsh
 python
 ```
 

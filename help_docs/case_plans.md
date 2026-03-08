@@ -1,6 +1,6 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) SeleniumBase Case Plans 🗂️
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> SeleniumBase Case Plans 🗂️</h2>
 
 <img src="https://seleniumbase.github.io/cdn/img/cp/sb_case_plans.png" title="SeleniumBase Case Plans Summary" width="625">
 
@@ -156,7 +156,7 @@
 
 🗂️ Before you can generate a ``case_summary.md`` file that includes your existing Case Plans, first you'll need to select which existing tests you want to create boilerplate Case Plans from. For that, you can use the SeleniumBase Case Plans GUI:
 
-```bash
+```zsh
 sbase caseplans
 ```
 
@@ -164,7 +164,7 @@ sbase caseplans
 
 🗂️ Once you are running the Case Plans GUI, select the existing tests that need Case Plans, and then click: ``Generate boilerplate Case Plans for selected tests missing them``. For each selected test that didn't already have a Case Plan file, one will be generated. Each new Case Plan file starts with default boilerplate code with a Markdown table. Eg:
 
-```bash
+```zsh
 ``proxy_test.py::ProxyTests::test_proxy``
 ---
 | # | Step Description | Expected Result |
@@ -208,7 +208,7 @@ sbase caseplans
 
 🗂️ When calling ``sbase caseplans``, you can provide additional arguments to limit the tests that appear in the list. The same discovery rules apply as when using ``pytest``. Eg:
 
-```bash
+```zsh
 sbase caseplans
 sbase caseplans -k agent
 sbase caseplans -m marker2

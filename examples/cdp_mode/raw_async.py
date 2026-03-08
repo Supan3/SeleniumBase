@@ -6,23 +6,28 @@ from seleniumbase import cdp_driver
 
 
 async def main():
-    url = "https://www.priceline.com/"
-    driver = await cdp_driver.start_async(lang="en")
-    page = await driver.get(url)
-    time.sleep(3)
-    print(await page.evaluate("document.title"))
-    element = await page.select('[data-testid*="endLocation"]')
-    await element.click_async()
-    time.sleep(1)
-    await element.send_keys_async("Boston")
-    time.sleep(2)
+    url = "https://seleniumbase.io/simple/login"
+    driver = await cdp_driver.start_async()
+    page = await driver.get(url, lang="en")
+    print(await page.get_title())
+    await page.type("#username", "demo_user")
+    await page.type("#password", "secret_pass")
+    await page.click("#log-in")
+    print(await page.get_title())
+    element = await page.select("h1")
+    assert element.text == "Welcome!"
+    top_nav = await page.select("div.topnav")
+    links = await top_nav.query_selector_all_async("a")
+    for nav_item in links:
+        print(nav_item.text)
+    driver.stop()
 
 if __name__ == "__main__":
     # Call an async function with awaited methods
     loop = asyncio.new_event_loop()
     loop.run_until_complete(main())
 
-    # Call everything without using async / await
+    # An example of wrapping all async calls with event loops
     driver = cdp_driver.start_sync()
     page = loop.run_until_complete(driver.get("about:blank"))
     loop.run_until_complete(page.set_locale("en"))
@@ -39,6 +44,7 @@ if __name__ == "__main__":
     time.sleep(2)
     print(loop.run_until_complete(page.evaluate("document.title")))
     time.sleep(1)
+    driver.stop()
 
     # Call CDP methods via the simplified SB CDP API
     sb = sb_cdp.Chrome("https://www.priceline.com/")
@@ -52,13 +58,14 @@ if __name__ == "__main__":
     where_to = 'div[data-automation*="experiences"] input'
     button = 'button[data-automation*="experiences-search"]'
     sb.wait_for_text("Where to?")
-    sb.gui_click_element(where_to)
+    sb.click(where_to)
     sb.press_keys(where_to, location)
     sb.sleep(1)
-    sb.gui_click_element(button)
+    sb.click(button)
     sb.sleep(3)
     print(sb.get_title())
     print("************")
     cards = sb.select_all('span[data-automation*="product-list-card"]')
     for card in cards:
         print("* %s" % card.text)
+    sb.driver.stop()

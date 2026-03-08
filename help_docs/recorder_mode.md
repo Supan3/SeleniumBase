@@ -1,6 +1,6 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Recorder Mode 🔴/⏺️
+<h2><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"> Recorder Mode 🔴/⏺️</h2>
 
 <!-- YouTube View --><a href="https://www.youtube.com/watch?v=eKN5nq7YbdM"><img src="http://img.youtube.com/vi/eKN5nq7YbdM/0.jpg" title="SeleniumBase on YouTube" width="285" /></a>
 <!-- GitHub Only --><p>(<b><a href="https://www.youtube.com/watch?v=eKN5nq7YbdM">Watch the tutorial on YouTube</a></b>)</p>
@@ -13,7 +13,7 @@
 
 ⏺️ To make a new recording from the command-line interface, use ``sbase mkrec``, ``sbase codegen``, or ``sbase record``:
 
-```bash
+```zsh
 sbase mkrec TEST_NAME.py --url=URL
 ```
 
@@ -21,7 +21,7 @@ If the file already exists, you'll get an error. If no URL is provided, you'll s
 
 Example:
 
-```bash
+```zsh
 sbase mkrec new_test.py --url=wikipedia.org
 
 * RECORDING initialized: new_test.py
@@ -50,7 +50,7 @@ pytest new_test.py --rec -q -s --url=wikipedia.org
 
 🔴 You can also activate Recorder Mode from the Recorder Desktop App:
 
-```bash
+```zsh
 sbase recorder
 * Starting the SeleniumBase Recorder Desktop App...
 ```
@@ -65,7 +65,7 @@ sbase recorder
 
 ⏺️ For extra flexibility, the ``sbase mkrec`` command can be split into four separate commands:
 
-```bash
+```zsh
 sbase mkfile TEST_NAME.py --rec
 
 pytest TEST_NAME.py --rec -q -s
@@ -85,13 +85,13 @@ import pdb; pdb.set_trace()
 
 Now you'll be able to run your test with ``pytest``, and it will stop at the breakpoint for you to add in actions: (Press ``c`` and ``ENTER`` on the command-line to continue from the breakpoint.)
 
-```bash
+```zsh
 pytest TEST_NAME.py --rec -s
 ```
 
 ⏺️ You can also set a breakpoint at the start of your test by adding ``--trace`` as a ``pytest`` command-line option: (This is useful when running Recorder Mode without any ``pdb`` breakpoints.)
 
-```bash
+```zsh
 pytest TEST_NAME.py --trace --rec -s
 ```
 
@@ -99,14 +99,14 @@ pytest TEST_NAME.py --trace --rec -s
 
 ⏺️ Here's a command-line notification for a completed recording:
 
-```bash
+```zsh
 >>> RECORDING SAVED as: recordings/TEST_NAME_rec.py
 ***************************************************
 ```
 
 ⏺️ When running additional tests from the same Python module, Recordings will get added to the file that was created from the first test:
 
-```bash
+```zsh
 >>> RECORDING ADDED to: recordings/TEST_NAME_rec.py
 ***************************************************
 ```

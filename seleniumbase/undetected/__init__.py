@@ -5,6 +5,7 @@ import requests
 import subprocess
 import sys
 import time
+from filelock import FileLock
 import selenium.webdriver.chrome.service
 import selenium.webdriver.chrome.webdriver
 import selenium.webdriver.common.service
@@ -117,6 +118,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         self.patcher = None
         import fasteners
         from seleniumbase.fixtures import constants
+        from seleniumbase.fixtures import shared_utils
         if patch_driver:
             uc_lock = fasteners.InterProcessLock(
                 constants.MultiBrowser.DRIVER_FIXING_LOCK
@@ -145,9 +147,14 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         debug_port = 9222
         special_port_free = False  # If the port isn't free, don't use 9222
         try:
-            res = requests.get("http://127.0.0.1:9222", timeout=1)
-            if res.status_code != 200:
-                raise Exception("The port is free! It will be used!")
+            with requests.Session() as session:
+                res = session.get(
+                    "http://127.0.0.1:9222",
+                    headers={"Connection": "close"},
+                    timeout=2,
+                )
+                if res.status_code != 200:
+                    raise Exception("The port is free! It will be used!")
         except Exception:
             # Use port 9222, which outputs to chrome://inspect/#devices
             special_port_free = True
@@ -156,7 +163,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         from seleniumbase import config as sb_config
         if (
             (("-n" in sys.argv) or (" -n=" in arg_join) or ("-c" in sys.argv))
-            or (hasattr(sb_config, "multi_proxy") and sb_config.multi_proxy)
+            or getattr(sb_config, "multi_proxy", None)
             or not special_port_free
         ):
             debug_port = selenium.webdriver.common.service.utils.free_port()
@@ -190,9 +197,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
                 except IndexError:
                     pass
         if not user_data_dir:
-            if hasattr(options, "user_data_dir") and getattr(
-                options, "user_data_dir", None
-            ):
+            if getattr(options, "user_data_dir", None):
                 options.add_argument(
                     "--user-data-dir=%s" % options.user_data_dir
                 )
@@ -279,10 +284,11 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
                     options.binary_location, *options.arguments
                 )
             else:
-                gui_lock = fasteners.InterProcessLock(
-                    constants.MultiBrowser.PYAUTOGUILOCK
-                )
+                gui_lock = FileLock(constants.MultiBrowser.PYAUTOGUILOCK)
                 with gui_lock:
+                    shared_utils.make_writable(
+                        constants.MultiBrowser.PYAUTOGUILOCK
+                    )
                     browser = subprocess.Popen(
                         [options.binary_location, *options.arguments],
                         stdin=subprocess.PIPE,
@@ -397,8 +403,7 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
 
     def add_cdp_listener(self, event_name, callback):
         if (
-            self.reactor
-            and self.reactor is not None
+            getattr(self, "reactor", None)
             and isinstance(self.reactor, Reactor)
         ):
             self.reactor.add_event_handler(event_name, callback)
@@ -406,7 +411,10 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         return False
 
     def clear_cdp_listeners(self):
-        if self.reactor and isinstance(self.reactor, Reactor):
+        if (
+            getattr(self, "reactor", None)
+            and isinstance(self.reactor, Reactor)
+        ):
             self.reactor.handlers.clear()
 
     def window_new(self, url=None):
@@ -441,7 +449,13 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
             with suppress(Exception):
                 if self.service.is_connectable():
                     self.stop_client()
-                    self.service.stop()
+                    try:
+                        self.service.send_remote_shutdown_command()
+                    except TypeError:
+                        pass
+                    finally:
+                        with suppress(Exception):
+                            self.service._terminate_process()
             if isinstance(timeout, str):
                 if timeout.lower() == "breakpoint":
                     breakpoint()  # To continue:
@@ -456,13 +470,21 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         with suppress(Exception):
             for window_handle in self.window_handles:
                 self.switch_to.window(window_handle)
-                if self.current_url.startswith(
-                    "chrome-extension://"
-                ):
-                    self.close()
+                if self.current_url.startswith("chrome-extension://"):
+                    # https://issues.chromium.org/issues/396611138
+                    # (Remove the Linux conditional when resolved)
+                    # (So that close() is always called)
+                    if "linux" in sys.platform:
+                        self.close()
                     if self.service.is_connectable():
                         self.stop_client()
-                        self.service.stop()
+                        try:
+                            self.service.send_remote_shutdown_command()
+                        except TypeError:
+                            pass
+                        finally:
+                            with suppress(Exception):
+                                self.service._terminate_process()
                     self.service.start()
                     self.start_session()
                     time.sleep(0.003)
@@ -478,7 +500,13 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
                 if self.service.is_connectable():
                     self.stop_client()
                     time.sleep(0.003)
-                    self.service.stop()
+                    try:
+                        self.service.send_remote_shutdown_command()
+                    except TypeError:
+                        pass
+                    finally:
+                        with suppress(Exception):
+                            self.service._terminate_process()
         self._is_connected = False
 
     def connect(self):
@@ -493,13 +521,27 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
         with suppress(Exception):
             for window_handle in self.window_handles:
                 self.switch_to.window(window_handle)
-                if self.current_url.startswith(
-                    "chrome-extension://"
-                ):
-                    self.close()
+                current_url = None
+                if hasattr(self, "cdp") and hasattr(self.cdp, "driver"):
+                    with suppress(Exception):
+                        current_url = self.cdp.get_current_url()
+                if not current_url:
+                    current_url = self.current_url
+                if current_url.startswith("chrome-extension://"):
+                    # https://issues.chromium.org/issues/396611138
+                    # (Remove the Linux conditional when resolved)
+                    # (So that close() is always called)
+                    if "linux" in sys.platform:
+                        self.close()
                     if self.service.is_connectable():
                         self.stop_client()
-                        self.service.stop()
+                        try:
+                            self.service.send_remote_shutdown_command()
+                        except TypeError:
+                            pass
+                        finally:
+                            with suppress(Exception):
+                                self.service._terminate_process()
                     self.service.start()
                     self.start_session()
                     time.sleep(0.003)
@@ -527,15 +569,35 @@ class Chrome(selenium.webdriver.chrome.webdriver.WebDriver):
             logger.debug(e, exc_info=True)
         except Exception:
             pass
+        with suppress(Exception):
+            self.stop_client()
+        with suppress(Exception):
+            if hasattr(self, "command_executor") and self.command_executor:
+                self.command_executor.close()
+
+        # Remove instance reference to allow garbage collection
+        Chrome._instances.discard(self)
+
         if hasattr(self, "service") and getattr(self.service, "process", None):
             logger.debug("Stopping webdriver service")
             with suppress(Exception):
-                self.stop_client()
-                self.service.stop()
-        with suppress(Exception):
-            if self.reactor and isinstance(self.reactor, Reactor):
-                logger.debug("Shutting down Reactor")
+                try:
+                    self.service.send_remote_shutdown_command()
+                except TypeError:
+                    pass
+                finally:
+                    with suppress(Exception):
+                        self.service._terminate_process()
+        if (
+            hasattr(self, "reactor")
+            and self.reactor
+            and hasattr(self.reactor, "event")
+        ):
+            logger.debug("Shutting down Reactor")
+            with suppress(Exception):
                 self.reactor.event.set()
+                self.reactor.join(timeout=2)
+            self.reactor = None
         if (
             hasattr(self, "keep_user_data_dir")
             and hasattr(self, "user_data_dir")

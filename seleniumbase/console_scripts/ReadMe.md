@@ -1,18 +1,18 @@
 <!-- SeleniumBase Docs -->
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Console Scripts 🌠
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> Console Scripts 🪄</h2>
 
 🌟 SeleniumBase console scripts can do many things, such as downloading web drivers, creating test directories with config files, activating the SeleniumBase Recorder, launching the SeleniumBase Commander, translating tests into other languages, running a Selenium Grid, and more.
 
-* Usage: ``seleniumbase [COMMAND] [PARAMETERS]``
+* Usage: `seleniumbase [COMMAND] [PARAMETERS]`
 
-* (simplified): ``sbase [COMMAND] [PARAMETERS]``
+* (simplified): `sbase [COMMAND] [PARAMETERS]`
 
-* To list all commands: ``seleniumbase --help``
+* To list all commands: `seleniumbase --help`
 
 (<i>For running tests, [use <b>pytest</b> with SeleniumBase](https://github.com/seleniumbase/SeleniumBase/blob/master/help_docs/customizing_test_runs.md).</i>)
 
-```bash
+```zsh
 COMMANDS:
       get / install    [DRIVER] [OPTIONS]
       methods          (List common Python methods)
@@ -48,18 +48,18 @@ COMMANDS:
     Use "pytest" for running tests.
 ```
 
-<h3>get / install</h3>
+<h3><code>get</code> / <code>install</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase get [DRIVER] [OPTIONS]
 sbase install [DRIVER] [OPTIONS]
 ```
 
 * Examples:
 
-```bash
+```zsh
 sbase get chromedriver
 sbase get geckodriver
 sbase get edgedriver
@@ -68,29 +68,40 @@ sbase get chromedriver 114.0.5735.90
 sbase get chromedriver stable
 sbase get chromedriver beta
 sbase get chromedriver -p
+sbase get chromium
 sbase get cft 131
 sbase get chs
 ```
 
-(Drivers:  ``chromedriver``, ``cft``, ``uc_driver``,
-           ``edgedriver``, ``chs``, ``geckodriver``)
+* Drivers:
 
-(Options:  A specific driver version or major version integer.
-           If not set, the driver version matches the browser.
-           ``-p`` / ``--path``: Also copy to "/usr/local/bin".)
+```zsh
+`chromedriver` , `cft`, `uc_driver`
+`edgedriver` , `chs` , `geckodriver`
+```
+
+* Options:
+
+```zsh
+NUM: A specific driver version or major version integer.
+     If not set, the driver version matches the browser.
+
+`-p` / `--path`: Also copy the driver to /usr/local/bin.
+```
 
 * Output:
 
-Downloads the webdriver to ``seleniumbase/drivers/``
-(``chromedriver`` is required for Chrome automation)
-(``geckodriver`` is required for Firefox automation)
-(``edgedriver`` is required for MS__Edge automation)
+Downloads the webdriver to `seleniumbase/drivers/`
 
-<h3>methods</h3>
+(`chromedriver` is required for Chrome automation)<br />
+(`geckodriver` is required for Firefox automation)<br />
+(`edgedriver` is required for Edge automation)
+
+<h3><code>methods</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase methods
 ```
 
@@ -98,11 +109,11 @@ sbase methods
 
 Displays common SeleniumBase Python methods.
 
-<h3>options</h3>
+<h3><code>options</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase options
 ```
 
@@ -111,7 +122,7 @@ sbase options
 Displays common pytest command-line options
 that are available when using SeleniumBase.
 
-```bash
+```zsh
 --browser=BROWSER  (The web browser to use. Default is "chrome")
 --edge / --firefox / --safari  (Shortcut for browser selection.)
 --headless  (Run tests headlessly. Default mode on Linux OS.)
@@ -165,11 +176,11 @@ that are available when using SeleniumBase.
 For the full list of command-line options, type: "pytest --help".
 ```
 
-<h3>behave-options</h3>
+<h3><code>behave-options</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase behave-options
 ```
 
@@ -178,7 +189,7 @@ sbase behave-options
 Displays common Behave command-line options
 that are available when using SeleniumBase.
 
-```bash
+```zsh
 -D browser=BROWSER  (The web browser to use. Default is "chrome")
 -D headless  (Run tests headlessly. Default mode on Linux OS.)
 -D demo  (Slow down and visually see test actions as they occur.)
@@ -223,27 +234,27 @@ that are available when using SeleniumBase.
 For the full list of command-line options, type: "behave --help".
 ```
 
-<h3>gui / commander</h3>
+<h3><code>gui</code> / <code>commander</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase gui [OPTIONAL PATH or TEST FILE]
 sbase commander [OPTIONAL PATH or TEST FILE]
 ```
 
-<h3>behave-gui</h3>
+<h3><code>behave-gui</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase behave-gui [OPTIONAL PATH or TEST FILE]
 sbase gui-behave [OPTIONAL PATH or TEST FILE]
 ```
 
 * Examples:
 
-```bash
+```zsh
 sbase behave-gui
 sbase behave-gui -i=calculator
 sbase behave-gui features/
@@ -254,17 +265,17 @@ sbase behave-gui features/calculator.feature
 
 Launches SeleniumBase Commander / GUI for Behave.
 
-<h3>caseplans</h3>
+<h3><code>caseplans</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase caseplans [OPTIONAL PATH or TEST FILE]
 ```
 
 * Examples:
 
-```bash
+```zsh
 sbase caseplans
 sbase caseplans -k agent
 sbase caseplans -m marker2
@@ -276,24 +287,25 @@ sbase caseplans offline_examples/
 
 Launches the SeleniumBase Case Plans Generator.
 
-<h3>mkdir</h3>
+<h3><code>mkdir</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase mkdir [DIRECTORY] [OPTIONS]
 ```
 
 * Example:
 
-```bash
+```zsh
 sbase mkdir ui_tests
 ```
 
 * Options:
 
-```bash
+```zsh
 -b / --basic  (Only config files. No tests added.)
+--gha  (Include GitHub Actions YML with defaults.)
 ```
 
 * Output:
@@ -304,7 +316,7 @@ sample tests for helping new users get started,
 and Python boilerplates for setting up customized
 test frameworks.
 
-```bash
+```zsh
 ui_tests/
 ├── __init__.py
 ├── my_first_test.py
@@ -328,9 +340,9 @@ ui_tests/
         └── swag_labs_test.py
 ```
 
-If running with the ``-b`` or ``--basic`` option:
+If running with the `-b` or `--basic` option:
 
-```bash
+```zsh
 ui_tests/
 ├── __init__.py
 ├── pytest.ini
@@ -338,23 +350,32 @@ ui_tests/
 └── setup.cfg
 ```
 
-<h3>mkfile</h3>
+If running with the `--gha` option, this is added:
+
+```zsh
+ui_tests/
+└── .github                    
+    └── workflows/             
+        └── python-package.yml
+```
+
+<h3><code>mkfile</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase mkfile [FILE.py] [OPTIONS]
 ```
 
 * Example:
 
-```bash
+```zsh
 sbase mkfile new_test.py
 ```
 
 * Options:
 
-```bash
+```zsh
 --uc  (UC Mode boilerplate using SB context manager)
 -b / --basic  (Basic boilerplate / single-line test)
 -r / --rec  (Adds Pdb+ breakpoint for Recorder Mode)
@@ -363,7 +384,7 @@ sbase mkfile new_test.py
 
 * Language Options:
 
-```bash
+```zsh
 --en / --English    |    --zh / --Chinese
 --nl / --Dutch      |    --fr / --French
 --it / --Italian    |    --ja / --Japanese
@@ -373,7 +394,7 @@ sbase mkfile new_test.py
 
 * Syntax Formats:
 
-```bash
+```zsh
 --bc / --basecase      (BaseCase class inheritance)
 --pf / --pytest-fixture         (sb pytest fixture)
 --cf / --class-fixture  (class + sb pytest fixture)
@@ -394,18 +415,18 @@ option, only the "open" method is included. Only the
 BaseCase format supports Languages or Recorder Mode.
 UC Mode automatically uses English with SB() format.
 
-<h3>mkrec / record / codegen</h3>
+<h3><code>mkrec</code> / <code>record</code> / <code>codegen</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase mkrec [FILE.py] [OPTIONS]
 sbase codegen [FILE.py] [OPTIONS]
 ```
 
 * Examples:
 
-```bash
+```zsh
 sbase mkrec new_test.py
 sbase mkrec new_test.py --url=seleniumbase.io
 sbase codegen new_test.py
@@ -414,7 +435,7 @@ sbase codegen new_test.py --url=wikipedia.org
 
 * Options:
 
-```bash
+```zsh
 --url=URL  (Sets the initial start page URL.)
 --edge  (Use Edge browser instead of Chrome.)
 --gui / --headed  (Use headed mode on Linux.)
@@ -429,17 +450,17 @@ sbase codegen new_test.py --url=wikipedia.org
 Creates a new SeleniumBase test using the Recorder.
 If the filename already exists, an error is raised.
 
-<h3>recorder</h3>
+<h3><code>recorder</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase recorder [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 --uc / --undetected  (Use undetectable mode.)
 --behave  (Also output Behave/Gherkin files.)
 ```
@@ -448,23 +469,23 @@ sbase recorder [OPTIONS]
 
 Launches the SeleniumBase Recorder Desktop App.
 
-<h3>mkpres</h3>
+<h3><code>mkpres</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase mkpres [FILE.py] [LANG]
 ```
 
 * Example:
 
-```bash
+```zsh
 sbase mkpres new_presentation.py --en
 ```
 
 * Language Options:
 
-```bash
+```zsh
 --en / --English    |    --zh / --Chinese
 --nl / --Dutch      |    --fr / --French
 --it / --Italian    |    --ja / --Japanese
@@ -480,23 +501,23 @@ By default, the slides are written in English,
 and use "serif" theme with "slide" transition.
 The slides can be used as a basic boilerplate.
 
-<h3>mkchart</h3>
+<h3><code>mkchart</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase mkchart [FILE.py] [LANG]
 ```
 
 * Example:
 
-```bash
+```zsh
 sbase mkchart new_chart.py --en
 ```
 
 * Language Options:
 
-```bash
+```zsh
 --en / --English    |    --zh / --Chinese
 --nl / --Dutch      |    --fr / --French
 --it / --Italian    |    --ja / --Japanese
@@ -512,17 +533,17 @@ By default, the slides are written in English,
 and use a "sky" theme with "slide" transition.
 The chart can be used as a basic boilerplate.
 
-<h3>print</h3>
+<h3><code>print</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase print [FILE] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 -n (Add line Numbers to the rows)
 ```
 
@@ -531,17 +552,17 @@ sbase print [FILE] [OPTIONS]
 Prints the code/text of any file
 with syntax-highlighting.
 
-<h3>translate</h3>
+<h3><code>translate</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase translate [SB_FILE.py] [LANGUAGE] [ACTION]
 ```
 
 * Languages:
 
-```bash
+```zsh
 --en / --English    |    --zh / --Chinese
 --nl / --Dutch      |    --fr / --French
 --it / --Italian    |    --ja / --Japanese
@@ -551,15 +572,15 @@ sbase translate [SB_FILE.py] [LANGUAGE] [ACTION]
 
 * Actions:
 
-```bash
+```zsh
 -p / --print  (Print translation output to the screen)
 -o / --overwrite  (Overwrite the file being translated)
--c / --copy  (Copy the translation to a new ``.py`` file)
+-c / --copy  (Copy the translation to a new `.py` file)
 ```
 
 * Options:
 
-```bash
+```zsh
 -n  (include line Numbers when using the Print action)
 ```
 
@@ -568,18 +589,18 @@ sbase translate [SB_FILE.py] [LANGUAGE] [ACTION]
 Translates a SeleniumBase Python file into the language
 specified. Method calls and "import" lines get swapped.
 Both a language and an action must be specified.
-The ``-p`` action can be paired with one other action.
-When running with ``-c`` (or ``--copy``), the new file name
+The `-p` action can be paired with one other action.
+When running with `-c` (or `--copy`), the new file name
 will be the original name appended with an underscore
 plus the 2-letter language code of the new language.
 (Example: Translating "test_1.py" into Japanese with
-``-c`` will create a new file called "test_1_ja.py".)
+`-c` will create a new file called "test_1_ja.py".)
 
-<h3>extract-objects</h3>
+<h3><code>extract-objects</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase extract-objects [SB_FILE.py]
 ```
 
@@ -589,17 +610,17 @@ Creates page objects based on selectors found in a
 seleniumbase Python file and saves those objects to the
 "page_objects.py" file in the same folder as the tests.
 
-<h3>inject-objects</h3>
+<h3><code>inject-objects</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase inject-objects [SB_FILE.py] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 -c / --comments  (Add object selectors to the comments.)
 ```
 
@@ -609,17 +630,17 @@ Takes the page objects found in the "page_objects.py"
 file and uses those to replace matching selectors in
 the selected seleniumbase Python file.
 
-<h3>objectify</h3>
+<h3><code>objectify</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase objectify [SB_FILE.py] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 -c / --comments  (Add object selectors to the comments.)
 ```
 
@@ -629,77 +650,77 @@ A modified version of the file where the selectors
 have been replaced with variable names defined in
 "page_objects.py", supporting the Page Object Pattern.
 (This has the same outcome as combining
-``extract-objects`` with ``inject-objects``)
+`extract-objects` with `inject-objects`)
 
-<h3>revert-objects</h3>
+<h3><code>revert-objects</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase revert-objects [SB_FILE.py] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 -c / --comments  (Keep existing comments for the lines.)
 ```
 
 * Output:
 
-Reverts the changes made by ``seleniumbase objectify ...`` or
-``seleniumbase inject-objects ...`` when run against a
+Reverts the changes made by `seleniumbase objectify ...` or
+`seleniumbase inject-objects ...` when run against a
 seleniumbase Python file. Objects will get replaced by
 selectors stored in the "page_objects.py" file.
 
-<h3>convert</h3>
+<h3><code>convert</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase convert [WEBDRIVER_UNITTEST_FILE.py]
 ```
 
 * Output:
 
 Converts a Selenium IDE exported WebDriver unittest
-file into a SeleniumBase file. Adds ``_SB`` to the
+file into a SeleniumBase file. Adds `_SB` to the
 new filename while keeping the original file intact.
 Works on both Selenium IDE & Katalon Recorder scripts.
 
-<h3>encrypt / obfuscate</h3>
+<h3><code>encrypt</code> / <code>obfuscate</code></h3>
 
 * Usage:
 
-``sbase encrypt``  /  ``sbase obfuscate``
+`sbase encrypt`  /  `sbase obfuscate`
 
 * Output:
 
 Runs the password encryption/obfuscation tool.
 (Where you can enter a password to encrypt/obfuscate.)
 
-<h3>decrypt / unobfuscate</h3>
+<h3><code>decrypt</code> / <code>unobfuscate</code></h3>
 
 * Usage:
 
-``sbase decrypt``  /  ``sbase unobfuscate``
+`sbase decrypt`  /  `sbase unobfuscate`
 
 * Output:
 
 Runs the password decryption/unobfuscation tool.
 (Where you can enter an encrypted password to decrypt.)
 
-<h3>proxy</h3>
+<h3><code>proxy</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase proxy [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 --hostname=HOSTNAME  (Set `hostname`) (Default: `127.0.0.1`)
 --port=PORT          (Set `port`)     (Default: `8899`)
 --help / -h      (Display available `proxy` options.)
@@ -708,13 +729,13 @@ sbase proxy [OPTIONS]
 * Output:
 
 Launch a basic proxy server on the current machine.
-(Uses ``127.0.0.1:8899`` as the default address.)
+(Uses `127.0.0.1:8899` as the default address.)
 
-<h3>download</h3>
+<h3><code>download</code></h3>
 
 * Usage:
 
-```bash
+```zsh
 sbase download server
 ```
 
@@ -723,17 +744,17 @@ sbase download server
 Downloads the Selenium Server JAR file for Grid usage.
 (That JAR file is required when using a Selenium Grid)
 
-<h3>grid-hub</h3>
+<h3><code>grid-hub</code></h3>
 
 * Usage:
 
-```bash
-sbase grid-hub {start|stop|restart} [OPTIONS]
+```zsh
+sbase grid-hub [start|stop|restart] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 -v / --verbose  (Increases verbosity of logging output.)
 --timeout=TIMEOUT  (Close idle browser windows after TIMEOUT seconds.)
 ```
@@ -746,17 +767,17 @@ to speed up test runs and reduce the total time
 of test suite execution.
 You can start, restart, or stop the Grid Hub server.
 
-<h3>grid-node</h3>
+<h3><code>grid-node</code></h3>
 
 * Usage:
 
-```bash
-sbase grid-node {start|stop|restart} [OPTIONS]
+```zsh
+sbase grid-node [start|stop|restart] [OPTIONS]
 ```
 
 * Options:
 
-```bash
+```zsh
 --hub=HUB_IP (Grid Hub IP Address. Default: `127.0.0.1`)
 -v / --verbose  (Increases verbosity of logging output.)
 ```
@@ -769,4 +790,4 @@ You can start, restart, or stop the Grid node.
 
 --------
 
-[<img src="https://seleniumbase.github.io/cdn/img/super_logo_sb.png" title="SeleniumBase" width="290">](https://github.com/seleniumbase/SeleniumBase/blob/master/README.md)
+<a href="https://github.com/seleniumbase/SeleniumBase/blob/master/README.md"><img src="https://seleniumbase.github.io/cdn/img/super_logo_sb.png" title="SeleniumBase" width="290"></a>

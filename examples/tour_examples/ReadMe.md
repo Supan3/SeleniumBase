@@ -2,7 +2,7 @@
 
 <h3 align="left"><img src="https://seleniumbase.github.io/cdn/img/g_maps_tour.png" alt="SeleniumBase Tour" width="340" /></h3>
 
-## [<img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32">](https://github.com/seleniumbase/SeleniumBase/) Interactive Product Tours 🚎
+<h2><a href="https://github.com/seleniumbase/SeleniumBase/"><img src="https://seleniumbase.github.io/img/logo6.png" title="SeleniumBase" width="32"></a> 🌏 Interactive Product Tours 🚎</h2>
 
 <p><b>Increase SaaS Product Adoption by 10x or more.</b></p>
 
@@ -16,7 +16,7 @@
 
 [SeleniumBase maps_introjs_tour.py](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/tour_examples/maps_introjs_tour.py)
 
-```bash
+```zsh
 cd examples/tour_examples
 pytest maps_introjs_tour.py --interval=1
 ```
@@ -27,7 +27,7 @@ pytest maps_introjs_tour.py --interval=1
 
 [SeleniumBase google_tour.py](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/tour_examples/google_tour.py)
 
-```bash
+```zsh
 cd examples/tour_examples
 pytest google_tour.py
 ```
@@ -130,7 +130,7 @@ class MyTourClass(BaseCase):
 
 #### That code is from [google_tour.py](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/tour_examples/google_tour.py), which you can run from the ``tour_examples/`` folder with the following command:
 
-```bash
+```zsh
 pytest google_tour.py
 ```
 

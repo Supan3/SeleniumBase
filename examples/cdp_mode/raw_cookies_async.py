@@ -9,14 +9,11 @@ async def get_login_cookies():
     url = "https://www.saucedemo.com"
     driver = await cdp_driver.start_async(incognito=True)
     page = await driver.get(url)
-    element = await page.select("#user-name")
-    await element.send_keys_async("standard_user")
-    element = await page.select("#password")
-    await element.send_keys_async("secret_sauce")
-    element = await page.select('input[type="submit"]')
-    await element.click_async()
+    await page.type("#user-name", "standard_user")
+    await page.type("#password", "secret_sauce")
+    await page.click('input[type="submit"]')
     cookies = await driver.cookies.get_all()
-    await page.close()
+    driver.stop()
     return cookies
 
 
@@ -30,6 +27,7 @@ async def login_with_cookies(cookies):
     await driver.get(url_2)
     await page.select("div.inventory_list")
     time.sleep(2)
+    driver.stop()
 
 
 if __name__ == "__main__":

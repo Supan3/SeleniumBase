@@ -91,10 +91,11 @@ class HackTests(BaseCase):
         self.open("https://dev.to/top/infinity")
         self.click_if_visible('button[aria-label="Close campaign banner"]')
         self.click_if_visible('svg[aria-label="Close campaign banner"]')
-        try:
+        self.click_if_visible('button[id*="sponsorship-close-trigger"]')
+        if self.is_element_visible('main div:contains("Pinned")'):
             self.hide_elements('main div:contains("Pinned")')
-        except Exception:
-            pass
+        if self.is_element_visible('[data-type-of="in_house"]'):
+            self.hide_elements('[data-type-of="in_house"]')
         self.set_text_content('nav a[data-text="Relevant"]', "ALL")
         self.set_text_content('nav a[data-text="Latest"]', "YOUR")
         self.set_text_content('nav a[data-text="Top"]', "BASE")
@@ -124,42 +125,17 @@ class HackTests(BaseCase):
         self.highlight('nav a[data-text="Month"]', loops=1, scroll=False)
         self.highlight('nav a[data-text="Year"]', loops=1, scroll=False)
         self.highlight('nav a[data-text="Infinity"]', loops=3, scroll=False)
-        if self.is_element_visible('h2 a[href*="simonh"]'):
-            self.highlight('h2 a[href*="simonh"]', loops=7, scroll=False)
         if self.is_element_visible('main h2 a[id*="article"]'):
             self.highlight('main h2 a[id*="article"]', loops=7, scroll=False)
         self.highlight("section.crayons-card", loops=7, scroll=False)
 
-        self.open("https://azure.microsoft.com/en-us/services/playfab/")
-        self.set_text_content("h1", aybabtu)
-        self.set_text_content('a[aria-label*="Try Azure"]', ayb)
-        self.set_text_content('a[aria-label*="Sign in to"]', abtu)
-        self.remove_elements('div[role="dialog"]')
-        self.remove_elements('[aria-label*="Microsoft Survey"]')
-        self.highlight("h1", loops=6, scroll=False)
-        self.highlight('a[aria-label*="Try Azure"]', loops=4, scroll=False)
-        self.highlight('a[aria-label*="Sign in to"]', loops=6, scroll=False)
-
         self.open("https://store.steampowered.com/")
+        self.set_text_content('a[href*="steamcommunity.com/"]', " ")
         self.set_text_content('div.content a[href*="/about/"]', " ")
         self.set_text_content('div.content a[href*="help.steam"]', aybabtu)
-        self.set_text_content("#foryou_tab a", "ALL")
-        self.set_text_content("#noteworthy_tab a", "YOUR BASE")
-        self.set_text_content("#genre_tab a", "ARE")
-        self.set_text_content('span:contains("Points Shop")', "BELONG")
-        self.set_text_content('span:contains("News")', "TO")
-        self.set_text_content('span:contains("Labs")', "US")
-        self.set_value("input#store_nav_search_term", ayb + " . . . .")
-        self.highlight('div.content a[href*="help.steam"]', loops=6)
-        self.highlight("#store_nav_area", loops=2, scroll=False)
-        self.highlight("#foryou_tab a", loops=1, scroll=False)
-        self.highlight("#noteworthy_tab a", loops=3, scroll=False)
-        self.highlight("#genre_tab a", loops=1, scroll=False)
-        self.highlight('span:contains("BELONG")', loops=1, scroll=False)
-        self.highlight('span:contains("TO")', loops=1, scroll=False)
-        self.highlight('span:contains("US")', loops=2, scroll=False)
-        self.js_click('input[id*="nav_search"]')
-        self.highlight('input[id*="nav_search"]', loops=6, scroll=False)
+        zoom_in = '[href*="help.steam"]{zoom: 1.5;-moz-transform: scale(1.5);}'
+        self.add_css_style(zoom_in)
+        self.highlight('div.content a[href*="help.steam"]', loops=12)
 
         self.open("https://xkcd.com/286/")
         self.set_text_content('a[href="/archive"]', "ALL")
@@ -218,9 +194,9 @@ class HackTests(BaseCase):
         self.set_text_content('nav a[href="/docs/"]', "ALL")
         self.set_text_content('nav a[href="/blog/"]', "YOUR")
         self.set_text_content('nav a[href="/training/"]', "BASE")
-        self.set_text_content('nav a[href="/partners/"]', "ARE")
-        self.set_text_content('nav a[href="/community/"]', "BELONG")
-        self.set_text_content('nav a[href="/case-studies/"]', "TO")
+        self.set_text_content('nav a[href="/careers/"]', "ARE")
+        self.set_text_content('nav a[href="/partners/"]', "BELONG")
+        self.set_text_content('nav a[href="/community/"]', "TO")
         self.set_text_content("nav #navbarDropdown", "US")
         self.set_text_content("nav #navbarDropdownMenuLink", ".")
         if self.is_element_visible("h1"):
@@ -229,9 +205,9 @@ class HackTests(BaseCase):
         self.highlight('nav a[href="/docs/"]', loops=1, scroll=False)
         self.highlight('nav a[href="/blog/"]', loops=1, scroll=False)
         self.highlight('nav a[href="/training/"]', loops=2, scroll=False)
+        self.highlight('nav a[href="/careers/"]', loops=1, scroll=False)
         self.highlight('nav a[href="/partners/"]', loops=1, scroll=False)
         self.highlight('nav a[href="/community/"]', loops=1, scroll=False)
-        self.highlight('nav a[href="/case-studies/"]', loops=1, scroll=False)
         self.highlight("nav #navbarDropdown", loops=2, scroll=False)
         if self.is_element_visible("h1"):
             self.highlight("h1", loops=6, scroll=False)
@@ -325,11 +301,7 @@ class HackTests(BaseCase):
 
         self.open("https://git-scm.com/")
         self.set_text_content("span#tagline", aybabtu)
-        self.set_text_content("#nav-about h3", ayb)
-        self.set_text_content("#nav-documentation h3", abtu)
-        self.highlight("span#tagline", loops=8, scroll=False)
-        self.highlight("#nav-about h3", loops=5, scroll=False)
-        self.highlight("#nav-documentation h3", loops=6, scroll=False)
+        self.highlight("span#tagline", loops=10, scroll=False)
 
         self.open("https://pragprog.com/")
         self.set_text_content("header p", aybabtu)

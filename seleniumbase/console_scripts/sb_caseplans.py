@@ -15,7 +15,6 @@ Examples:
 Output:
       Launches the SeleniumBase Case Plans Generator.
 """
-import codecs
 import colorama
 import os
 import subprocess
@@ -24,13 +23,6 @@ import tkinter as tk
 from seleniumbase.fixtures import shared_utils
 from tkinter import messagebox
 from tkinter.scrolledtext import ScrolledText
-
-if sys.version_info <= (3, 8):
-    current_version = ".".join(str(ver) for ver in sys.version_info[:3])
-    raise Exception(
-        "\n* SBase Case Plans Generator requires Python 3.8 or newer!"
-        "\n** You are currently using Python %s" % current_version
-    )
 
 
 def set_colors(use_colors):
@@ -142,7 +134,7 @@ def generate_case_plan_boilerplates(
         file_name = case_id
         file_path = os.path.join(full_folder_path, file_name)
         if not os.path.exists(file_path):
-            out_file = codecs.open(file_path, "w+", "utf-8")
+            out_file = open(file_path, mode="w+", encoding="utf-8")
             out_file.writelines("\r\n".join(data))
             out_file.close()
             new_plans += 1
@@ -190,7 +182,7 @@ def view_summary_of_existing_case_plans(root, tests):
         else:
             case_path = os.path.join(folder_path, "case_plans", case_id)
         if os.path.exists(case_path):
-            f = open(case_path, "r")
+            f = open(case_path, mode="r")
             case_data = f.read()
             f.close()
             case_data_storage.append(case_data)
@@ -323,7 +315,7 @@ def view_summary_of_existing_case_plans(root, tests):
     full_plan = plan_head
 
     file_path = "case_summary.md"
-    file = codecs.open(file_path, "w+", "utf-8")
+    file = open(file_path, mode="w+", encoding="utf-8")
     file.writelines("\r\n".join(full_plan))
     file.close()
 
